@@ -1,0 +1,48 @@
+{
+  "name": "pet-app-lite",
+  "version": "1.0.0",
+  "description": "桌宠 Lite - 轻量桌宠（仅浮窗+聊天），独立启动与打包，与原版共享设置和记忆",
+  "main": "main.js",
+  "author": "PetApp",
+  "license": "MIT",
+  "scripts": {
+    "start": "node start.js",
+    "setup-tts": "node scripts/setup-tts.js",
+    "postinstall": "node scripts/setup-tts.js",
+    "build": "npm run setup-tts && electron-builder --win"
+  },
+  "build": {
+    "appId": "com.petapp.lite",
+    "productName": "PetAppLite",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "start.js",
+      "float.html",
+      "float.css",
+      "float.js",
+      "cookie.html",
+      "package.json"
+    ],
+    "extraResources": [
+      { "from": "python", "to": "python" },
+      { "from": "tts_service", "to": "tts_service" },
+      { "from": "img", "to": "img" }
+    ],
+    "win": {
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "devDependencies": {
+    "electron": "31.0.0",
+    "electron-builder": "24.13.3"
+  }
+}

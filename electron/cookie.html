@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>饼干</title>
+    <link rel="stylesheet" href="cookie.css">
+</head>
+<body>
+    <div class="cookie-container" id="cookieContainer">
+        <img src="" alt="cookie" id="cookieImg" width="40" height="40">
+    </div>
+    <script>
+    // 贴图路径辅助函数
+    window._stickerPack = '默认';
+    window.imgPath = function(filename) {
+        return 'img/' + (window._stickerPack || '默认') + '/' + filename;
+    };
+    document.getElementById('cookieImg').src = imgPath('浮窗_饼干.png');
+</script>
+    <script src="cookie.js"></script>
+</body>
+</html>

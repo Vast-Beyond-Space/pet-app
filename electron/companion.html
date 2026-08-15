@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>陪伴模式</title>
+    <link rel="stylesheet" href="companion.css">
+</head>
+<body>
+    <div class="companion-container" id="companionContainer">
+        <!-- 立绘 -->
+        <img id="companionPet" class="companion-pet" src="" alt="pet">
+        
+        <!-- 顶部按钮（悬浮） -->
+        <div class="companion-controls">
+            <button class="ctrl-btn" id="micBtn" title="持续录音">🎤</button>
+            <button class="ctrl-btn" id="backToMainBtn" title="返回主窗口">🏠</button>
+            <button class="ctrl-btn" id="switchToChatBtn" title="切换到浮窗聊天">💬</button>
+        </div>
+        
+        <!-- 录音状态指示器 -->
+        <div class="mic-status" id="micStatus"></div>
+        
+        <!-- 桌宠说话气泡 -->
+        <div class="companion-speech" id="companionSpeech"></div>
+    </div>
+    <script>
+    // 贴图路径辅助函数（全局可用）
+    window._stickerPack = '默认';
+    window.imgPath = function(filename) {
+        return 'img/' + (window._stickerPack || '默认') + '/' + filename;
+    };
+</script>
+    <script src="companion.js"></script>
+</body>
+</html>

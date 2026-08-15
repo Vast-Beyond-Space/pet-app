@@ -1,0 +1,125 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+    width: 100%; height: 100%;
+    background: transparent;
+    overflow: hidden;
+    user-select: none;
+}
+.companion-container {
+    width: 100%; height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    cursor: grab;
+}
+.companion-container:active { cursor: grabbing; }
+
+.companion-pet {
+    width: 180px; height: 180px;
+    object-fit: contain;
+    transition: transform 0.3s ease;
+    pointer-events: none;
+}
+.companion-pet:hover { transform: scale(1.05); }
+
+/* 控制按钮 - 悬浮在右上角 */
+.companion-controls {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    gap: 6px;
+    opacity: 0.3;
+    transition: opacity 0.3s ease;
+}
+.companion-container:hover .companion-controls {
+    opacity: 1;
+}
+.ctrl-btn {
+    width: 32px; height: 32px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.8);
+    font-size: 16px;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    transition: transform 0.2s;
+}
+.ctrl-btn:hover { transform: scale(1.1); }
+.ctrl-btn:active { transform: scale(0.9); }
+
+/* 说话气泡 */
+.companion-speech {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255,255,255,0.95);
+    padding: 10px 16px;
+    border-radius: 16px;
+    font-size: 14px;
+    color: #333;
+    max-width: 90%;
+    text-align: center;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    pointer-events: none;
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.5;
+}
+.companion-speech.show {
+    opacity: 1;
+    animation: speechFloat 2s ease-in-out infinite;
+}
+@keyframes speechFloat {
+    0%, 100% { transform: translateX(-50%) translateY(0); }
+    50% { transform: translateX(-50%) translateY(-6px); }
+}
+.companion-speech::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 6px solid rgba(255,255,255,0.95);
+}
+
+/* ===== 录音按钮样式 ===== */
+.ctrl-btn.recording {
+    background: rgba(255, 80, 80, 0.9);
+    color: white;
+    animation: micPulse 1.5s ease-in-out infinite;
+}
+@keyframes micPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 80, 80, 0.5); }
+    50% { box-shadow: 0 0 0 8px rgba(255, 80, 80, 0); }
+}
+
+/* 录音状态指示器 */
+.mic-status {
+    position: absolute;
+    top: 45px;
+    right: 8px;
+    background: rgba(255, 80, 80, 0.9);
+    color: white;
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+    white-space: nowrap;
+}
+.mic-status.active {
+    opacity: 1;
+    animation: micStatusBlink 1.5s ease-in-out infinite;
+}
+@keyframes micStatusBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}

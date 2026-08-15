@@ -1,0 +1,2506 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark" data-trae-theme="dark"><head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>浮窗</title>
+    <link rel="stylesheet" href="float.css">
+<style>.trae-browser-inspect-overlay{position:fixed;top:0;left:0;width:100%;height:100%;z-index:999997;pointer-events:auto;background:rgba(0,0,0,0)}.trae-browser-inspect-highlight-box{position:absolute;top:0;left:0;z-index:999998;display:none}.trae-browser-inspect-highlight-tag{position:absolute;left:0px;top:0px;height:18px;padding:0 6px;box-sizing:border-box;border-radius:4px;background-color:var(--vscode-icube-colorSuccessHover, "#2FB287");color:var(--vscode-icube-colorSnow, "#fff");font-size:12px;font-weight:400;display:none;align-items:center;z-index:999999}.trae-browser-inspect-highlight-box-show{display:flex}.trae-browser-inspect-select-button.trae-browser-inspect-highlight-box-show{display:flex !important}.trae-browser-inspect-select-button{position:absolute;top:0;left:0;background-color:var(--vscode-icube--bg-bg-base-secondary, "#222427");color:var(--vscode-icube--text-text-default-active, "#F5F9FE");font-size:11px;font-weight:500;border:1px solid var(--vscode-icube--border-neutral-l1, "#E0E2F217");border-radius:6px;padding:0 8px;height:32px;display:none;align-items:center;cursor:pointer;z-index:999999;gap:4px}.trae-browser-inspect-select-button svg,.trae-browser-inspect-select-button span{z-index:1}.trae-browser-inspect-select-highlight-box{background:rgba(0,0,0,0) !important}.trae-browser-inspect-select-highlight-box .trae-browser-inspect-highlight-tag{background-color:var(--vscode-icube--status-success-active, "#1E8B56")}.trae-browser-inspect-comment-card-container{position:fixed;top:0;left:0;z-index:9999999;pointer-events:auto}.trae-browser-inspect-comment-card-container .trae-browser-inspect-comment-card{display:flex;padding-top:0px !important;align-items:center;z-index:9999999 !important;background-color:var(--vscode-icube--bg-bg-menu)}*[contenteditable]{outline:none}.trae-browser-inspect-click-effect{position:fixed;width:40px;height:40px;margin-left:-20px;margin-top:-20px;border-radius:50%;background-color:var(--vscode-icube-colorSuccessHover, #2FB287);pointer-events:none;animation:trae-browser-inspect-ripple 500ms ease-out forwards;z-index:999999}@keyframes trae-browser-inspect-ripple{0%{transform:scale(0.3);opacity:.8}100%{transform:scale(2);opacity:0}}.trae-browser-inspect-ref-box{position:absolute;border:2px solid var(--vscode-icube-colorSuccessHover, "#2FB287");pointer-events:none;z-index:999998;animation:trae-browser-inspect-fadeInOut 2s ease-in-out forwards}.trae-browser-inspect-ref-label{position:absolute;top:-14px;left:0;height:14px;padding:0 4px;box-sizing:border-box;border-radius:2px;background-color:var(--vscode-icube-colorSuccessHover, "#2FB287");color:var(--vscode-icube-colorSnow, "#fff");font-size:9px;font-weight:500;display:flex;align-items:center;white-space:nowrap;z-index:999999}@keyframes trae-browser-inspect-fadeInOut{0%{opacity:0}10%{opacity:1}90%{opacity:1}100%{opacity:0}}.trae-browser-inspect-input-highlight{position:absolute;border:2px solid var(--vscode-icube-colorSuccessHover, "#2FB287");border-radius:4px;pointer-events:none;z-index:999998;box-shadow:0 0 8px var(--vscode-icube-colorSuccessHover, "#2FB287");animation:trae-browser-inspect-input-pulse 600ms ease-out forwards}@keyframes trae-browser-inspect-input-pulse{0%{opacity:0;box-shadow:0 0 0 var(--vscode-icube-colorSuccessHover, "#2FB287")}30%{opacity:1;box-shadow:0 0 12px var(--vscode-icube-colorSuccessHover, "#2FB287")}100%{opacity:0;box-shadow:0 0 0 var(--vscode-icube-colorSuccessHover, "#2FB287")}}.trae-browser-inspect-virtual-cursor{position:fixed;width:20px;height:20px;pointer-events:none;z-index:9999999;opacity:0;transition:opacity .2s ease}.trae-browser-inspect-virtual-cursor.trae-browser-inspect-cursor-visible{opacity:1}.trae-browser-inspect-virtual-cursor.trae-browser-inspect-cursor-idle{animation:trae-browser-inspect-cursor-breathe 2s ease-in-out infinite}.trae-browser-inspect-virtual-cursor svg{width:20px;height:20px;filter:drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3))}@keyframes trae-browser-inspect-cursor-breathe{0%,100%{opacity:.7}50%{opacity:1}}.trae-browser-inspect-scroll-indicator{position:fixed;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 16px;border-radius:8px;background-color:rgba(0,0,0,.7);color:#fff;font-size:13px;font-weight:500;pointer-events:none;z-index:999999;animation:trae-browser-inspect-indicator-fade 800ms ease-out forwards;backdrop-filter:blur(4px)}.trae-browser-inspect-scroll-indicator svg{width:16px;height:16px;fill:#fff}.trae-browser-inspect-scroll-indicator.trae-scroll-up{top:12px;left:50%;transform:translateX(-50%)}.trae-browser-inspect-scroll-indicator.trae-scroll-down{bottom:12px;left:50%;transform:translateX(-50%)}.trae-browser-inspect-scroll-indicator.trae-scroll-left{left:12px;top:50%;transform:translateY(-50%)}.trae-browser-inspect-scroll-indicator.trae-scroll-right{right:12px;top:50%;transform:translateY(-50%)}@keyframes trae-browser-inspect-indicator-fade{0%{opacity:0;transform:translateX(-50%) scale(0.9)}15%{opacity:1;transform:translateX(-50%) scale(1)}85%{opacity:1}100%{opacity:0}}.trae-browser-inspect-scroll-indicator.trae-scroll-left,.trae-browser-inspect-scroll-indicator.trae-scroll-right{animation-name:trae-browser-inspect-indicator-fade-y}@keyframes trae-browser-inspect-indicator-fade-y{0%{opacity:0;transform:translateY(-50%) scale(0.9)}15%{opacity:1;transform:translateY(-50%) scale(1)}85%{opacity:1}100%{opacity:0}}.trae-browser-inspect-key-badge{position:fixed;bottom:60px;left:50%;transform:translateX(-50%);padding:8px 20px;border-radius:8px;background-color:rgba(0,0,0,.8);color:#fff;font-size:18px;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,monospace;pointer-events:none;z-index:999999;animation:trae-browser-inspect-key-pop 500ms ease-out forwards;backdrop-filter:blur(4px);border:1px solid hsla(0,0%,100%,.15);box-shadow:0 4px 12px rgba(0,0,0,.3);letter-spacing:1px}@keyframes trae-browser-inspect-key-pop{0%{opacity:0;transform:translateX(-50%) translateY(10px) scale(0.9)}20%{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}80%{opacity:1}100%{opacity:0;transform:translateX(-50%) translateY(-10px)}}.trae-browser-inspect-step-badge{position:fixed;top:12px;left:12px;padding:6px 12px;border-radius:6px;background-color:var(--vscode-icube-colorSuccessHover, #2FB287);color:#fff;font-size:12px;font-weight:600;pointer-events:none;z-index:999999;animation:trae-browser-inspect-step-slide 600ms ease-out forwards;box-shadow:0 2px 8px rgba(47,178,135,.3);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.trae-browser-inspect-step-badge.trae-step-old{opacity:.4;transform:translateY(0)}@keyframes trae-browser-inspect-step-slide{0%{opacity:0;transform:translateX(-20px)}20%{opacity:1;transform:translateX(0)}100%{opacity:1;transform:translateX(0)}}.trae-browser-inspect-drag-trail{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:999998}.trae-browser-inspect-drag-trail svg{width:100%;height:100%}.trae-browser-inspect-drag-trail .trae-drag-path{fill:none;stroke:var(--vscode-icube-colorSuccessHover, #2FB287);stroke-width:2;stroke-dasharray:8 4;opacity:.6;animation:trae-browser-inspect-dash 600ms linear forwards}.trae-browser-inspect-drag-trail .trae-drag-dot{fill:var(--vscode-icube-colorSuccessHover, #2FB287);filter:drop-shadow(0 0 4px rgba(47, 178, 135, 0.6))}.trae-browser-inspect-drag-trail .trae-drag-endpoint{fill:none;stroke:var(--vscode-icube-colorSuccessHover, #2FB287);stroke-width:2;opacity:.5}@keyframes trae-browser-inspect-dash{0%{stroke-dashoffset:200}100%{stroke-dashoffset:0}}.trae-browser-inspect-drag-trail.trae-drag-fade{animation:trae-browser-inspect-trail-fade 400ms ease-out forwards}@keyframes trae-browser-inspect-trail-fade{0%{opacity:1}100%{opacity:0}}</style><script type="module">(async () => {
+  try {
+    const client = await import('/@vite/client');
+    const hmr = client.createHotContext('hmr-handler/fake.js');
+    hmr.on('vite:afterUpdate', window['__ICUBE_WEBVIEW_HMR_CALLBACK_1786437470893']);
+  } catch {}
+})();</script><style>.buttonsCard-bTXa5j {
+  padding: var(--spacer-4);
+  background: none;
+  align-items: center;
+  gap: 0;
+  display: inline-flex;
+}
+
+.actionButton-opZL8g {
+  align-items: center;
+  gap: var(--spacer-4);
+  padding: var(--spacer-4) var(--spacer-8);
+  border-radius: var(--radius-4);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  background: none;
+  border: none;
+  display: inline-flex;
+}
+
+.actionButton-opZL8g:hover {
+  background: var(--bg-bg-overlay-l2);
+}
+
+.actionButton-opZL8g:active {
+  background: var(--bg-bg-overlay-l3);
+}
+
+.actionButton-opZL8g:focus-visible {
+  outline: 2px solid var(--status-primary-default);
+  outline-offset: 1px;
+}
+
+.icon-ObJEMt {
+  width: 16px;
+  height: 16px;
+  color: var(--icon-icon-default);
+  flex-shrink: 0;
+  justify-content: center;
+  align-items: center;
+  display: flex;
+}
+
+.title-GptGAg {
+  font-family: var(--font-family-default);
+  color: var(--text-text-default);
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.shortcut-nbwTG4 {
+  color: var(--icon-icon-secondary);
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  display: flex;
+}
+
+.shortcutKey-EE6xrE {
+  font-family: var(--font-family-default);
+  color: var(--icon-icon-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 12px;
+}
+
+.divider-cFGVKQ {
+  box-sizing: content-box;
+  background-clip: content-box;
+  background-color: var(--border-border-neutral-l2);
+  flex-shrink: 0;
+  width: 1px;
+  height: 12px;
+  padding: 0 6px;
+}
+
+</style><style>.commentEditorCard-Un4Xaa {
+  width: 320px;
+  padding: var(--spacing-sm);
+  background: none;
+  flex-direction: column;
+  display: flex;
+}
+
+.textContainer-ZISwbW {
+  padding: var(--spacing-sm);
+  background: var(--bg-bg-overlay-l1);
+  border: 1px solid var(--border-border-neutral-l3);
+  border-radius: var(--radius-sm);
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding-right: 0;
+  display: flex;
+}
+
+.textarea-ggj4j6 {
+  padding: 0 var(--spacing-sm) 0 2px;
+  font-family: var(--font-family-default);
+  color: var(--text-text-default);
+  resize: none;
+  scrollbar-width: thin;
+  scrollbar-color: #56637726 transparent;
+  background: none;
+  border: none;
+  outline: none;
+  flex: 1;
+  max-height: 140px;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 20px;
+  overflow-y: auto;
+}
+
+.textarea-ggj4j6::-webkit-scrollbar {
+  width: 6px;
+}
+
+.textarea-ggj4j6::-webkit-scrollbar-track {
+  background: none;
+}
+
+.textarea-ggj4j6::-webkit-scrollbar-thumb {
+  background: #56637726;
+  border-radius: 3px;
+}
+
+.textarea-ggj4j6::placeholder {
+  color: var(--text-text-tertiary);
+}
+
+.actionBar-u_t8vc {
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--spacing-xs);
+  opacity: 0;
+  max-height: 0;
+  transition: max-height .2s ease-out, opacity .2s ease-out, margin-top .2s ease-out;
+  display: flex;
+  overflow: hidden;
+}
+
+.actionBarVisible-PxXsje {
+  opacity: 1;
+  max-height: 32px;
+  margin-top: var(--spacing-sm);
+}
+
+.actionBarNoExpandAnimation-FCra2J {
+  transition: opacity .2s ease-out;
+}
+
+.actionBarNoExpandAnimation-FCra2J.actionBarVisible-PxXsje {
+  max-height: 32px;
+  margin-top: var(--spacing-sm);
+}
+
+.cancelButton-Lu0me9 {
+  height: 24px;
+  padding: 0 var(--spacing-xs);
+  background: var(--bg-bg-overlay-l2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  border: none;
+  justify-content: center;
+  align-items: center;
+  display: flex;
+}
+
+.cancelButton-Lu0me9:hover, .cancelButton-Lu0me9:active {
+  background: var(--bg-bg-overlay-l3);
+}
+
+.cancelButton-Lu0me9:focus-visible {
+  outline: 2px solid var(--status-primary-default);
+  outline-offset: 1px;
+}
+
+.cancelText-j1RS1q {
+  font-family: var(--font-family-default);
+  color: var(--text-text-default);
+  white-space: nowrap;
+  padding: 0 var(--spacing-xs);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.submitButton-BqyEd7 {
+  height: 24px;
+  padding: 0 var(--spacing-sm);
+  background: var(--bg-bg-invert);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  border: none;
+  justify-content: center;
+  align-items: center;
+  display: flex;
+}
+
+.submitButton-BqyEd7:hover:not(:disabled) {
+  background: var(--bg-bg-invert-hover);
+}
+
+.submitButton-BqyEd7:active:not(:disabled) {
+  background: var(--bg-bg-invert-active);
+}
+
+.submitButton-BqyEd7:disabled {
+  background: var(--bg-bg-invert-disabled);
+  color: var(--text-text-disabled);
+  cursor: not-allowed;
+}
+
+.submitButton-BqyEd7:focus-visible {
+  outline: 2px solid var(--status-primary-default);
+  outline-offset: 1px;
+}
+
+.submitText-N58QRq {
+  font-family: var(--font-family-default);
+  color: var(--text-text-onaccent);
+  white-space: nowrap;
+  padding: 0 var(--spacing-xs);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.submitButton-BqyEd7:disabled .submitText-N58QRq {
+  color: var(--text-text-disabled);
+}
+
+.submitIcon-vyKSKQ {
+  width: 12px;
+  height: 12px;
+  color: var(--icon-icon-onaccent);
+  flex-shrink: 0;
+  justify-content: center;
+  align-items: center;
+  display: flex;
+}
+
+.submitButton-BqyEd7:disabled .submitIcon-vyKSKQ {
+  color: var(--text-text-disabled);
+}
+
+.limitWarning-Hocj0v {
+  align-items: center;
+  gap: var(--spacing-xs);
+  color: var(--status-warning-default);
+  user-select: none;
+  flex: 1;
+  display: flex;
+}
+
+.limitText-hBXEaq {
+  font-family: var(--font-family-default);
+  color: var(--status-warning-default);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+</style><style>.previewCommentCardContainer-HEkpU8 {
+  border-radius: var(--radius-8);
+  background: var(--bg-bg-menu);
+  border: 1px solid var(--border-border-neutral-l1);
+  transition: width .25s cubic-bezier(.4, 0, .2, 1), height .25s cubic-bezier(.4, 0, .2, 1);
+  display: inline-block;
+  overflow: hidden;
+  box-shadow: 0 2px 6px #0003, 0 .5px #ffffff0f, inset 0 .5px #ffffff0f;
+}
+
+.previewCommentCardContent-ELaLah {
+  width: max-content;
+  position: relative;
+}
+
+.previewCommentCardFadeEnter-OMhMD9 {
+  opacity: 0;
+}
+
+.previewCommentCardFadeEnterActive-Eacuvn {
+  opacity: 1;
+  transition: opacity .2s ease-in;
+}
+
+.previewCommentCardFadeExit-ms9vgc {
+  opacity: 1;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+.previewCommentCardFadeExitActive-vyQTsd {
+  opacity: 0;
+  transition: opacity .15s ease-out;
+}
+
+.previewCommentCardSuccessCard-PWnm2o {
+  white-space: nowrap;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  display: flex;
+}
+
+.previewCommentCardSuccessIcon-Oht9Ir {
+  width: 16px;
+  height: 16px;
+  color: var(--status-success-default);
+  justify-content: center;
+  align-items: center;
+  display: flex;
+}
+
+.previewCommentCardSuccessText-s40BWG {
+  font-family: var(--font-family-default);
+  color: var(--text-text-default);
+  user-select: none;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+</style><style id="trae-browser-inspect-drag-styles">
+            .trae-browser-inspect-draggable {
+                cursor: grab !important;
+            }
+            .trae-browser-inspect-dragging-active {
+                cursor: grabbing !important;
+            }
+            .trae-browser-inspect-drag-ghost {
+                opacity: 0.7;
+                pointer-events: none;
+                position: fixed;
+                z-index: 999998;
+                transform: scale(0.95);
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+                transition: none;
+            }
+            .trae-browser-inspect-element-placeholder {
+                opacity: 0.3;
+            }
+        </style><style>.trae-browser-inspect-overlay{position:fixed;top:0;left:0;width:100%;height:100%;z-index:999997;pointer-events:auto;background:rgba(0,0,0,0)}.trae-browser-inspect-highlight-box{position:absolute;top:0;left:0;z-index:999998;display:none}.trae-browser-inspect-highlight-tag{position:absolute;left:0px;top:0px;height:18px;padding:0 6px;box-sizing:border-box;border-radius:4px;background-color:var(--vscode-icube-colorSuccessHover, "#2FB287");color:var(--vscode-icube-colorSnow, "#fff");font-size:12px;font-weight:400;display:none;align-items:center;z-index:999999}.trae-browser-inspect-highlight-box-show{display:flex}.trae-browser-inspect-select-button.trae-browser-inspect-highlight-box-show{display:flex !important}.trae-browser-inspect-select-button{position:absolute;top:0;left:0;background-color:var(--vscode-icube--bg-bg-base-secondary, "#222427");color:var(--vscode-icube--text-text-default-active, "#F5F9FE");font-size:11px;font-weight:500;border:1px solid var(--vscode-icube--border-neutral-l1, "#E0E2F217");border-radius:6px;padding:0 8px;height:32px;display:none;align-items:center;cursor:pointer;z-index:999999;gap:4px}.trae-browser-inspect-select-button svg,.trae-browser-inspect-select-button span{z-index:1}.trae-browser-inspect-select-highlight-box{background:rgba(0,0,0,0) !important}.trae-browser-inspect-select-highlight-box .trae-browser-inspect-highlight-tag{background-color:var(--vscode-icube--status-success-active, "#1E8B56")}.trae-browser-inspect-comment-card-container{position:fixed;top:0;left:0;z-index:9999999;pointer-events:auto}.trae-browser-inspect-comment-card-container .trae-browser-inspect-comment-card{display:flex;padding-top:0px !important;align-items:center;z-index:9999999 !important;background-color:var(--vscode-icube--bg-bg-menu)}*[contenteditable]{outline:none}.trae-browser-inspect-click-effect{position:fixed;width:40px;height:40px;margin-left:-20px;margin-top:-20px;border-radius:50%;background-color:var(--vscode-icube-colorSuccessHover, #2FB287);pointer-events:none;animation:trae-browser-inspect-ripple 500ms ease-out forwards;z-index:999999}@keyframes trae-browser-inspect-ripple{0%{transform:scale(0.3);opacity:.8}100%{transform:scale(2);opacity:0}}.trae-browser-inspect-ref-box{position:absolute;border:2px solid var(--vscode-icube-colorSuccessHover, "#2FB287");pointer-events:none;z-index:999998;animation:trae-browser-inspect-fadeInOut 2s ease-in-out forwards}.trae-browser-inspect-ref-label{position:absolute;top:-14px;left:0;height:14px;padding:0 4px;box-sizing:border-box;border-radius:2px;background-color:var(--vscode-icube-colorSuccessHover, "#2FB287");color:var(--vscode-icube-colorSnow, "#fff");font-size:9px;font-weight:500;display:flex;align-items:center;white-space:nowrap;z-index:999999}@keyframes trae-browser-inspect-fadeInOut{0%{opacity:0}10%{opacity:1}90%{opacity:1}100%{opacity:0}}.trae-browser-inspect-input-highlight{position:absolute;border:2px solid var(--vscode-icube-colorSuccessHover, "#2FB287");border-radius:4px;pointer-events:none;z-index:999998;box-shadow:0 0 8px var(--vscode-icube-colorSuccessHover, "#2FB287");animation:trae-browser-inspect-input-pulse 600ms ease-out forwards}@keyframes trae-browser-inspect-input-pulse{0%{opacity:0;box-shadow:0 0 0 var(--vscode-icube-colorSuccessHover, "#2FB287")}30%{opacity:1;box-shadow:0 0 12px var(--vscode-icube-colorSuccessHover, "#2FB287")}100%{opacity:0;box-shadow:0 0 0 var(--vscode-icube-colorSuccessHover, "#2FB287")}}.trae-browser-inspect-virtual-cursor{position:fixed;width:20px;height:20px;pointer-events:none;z-index:9999999;opacity:0;transition:opacity .2s ease}.trae-browser-inspect-virtual-cursor.trae-browser-inspect-cursor-visible{opacity:1}.trae-browser-inspect-virtual-cursor.trae-browser-inspect-cursor-idle{animation:trae-browser-inspect-cursor-breathe 2s ease-in-out infinite}.trae-browser-inspect-virtual-cursor svg{width:20px;height:20px;filter:drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3))}@keyframes trae-browser-inspect-cursor-breathe{0%,100%{opacity:.7}50%{opacity:1}}.trae-browser-inspect-scroll-indicator{position:fixed;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 16px;border-radius:8px;background-color:rgba(0,0,0,.7);color:#fff;font-size:13px;font-weight:500;pointer-events:none;z-index:999999;animation:trae-browser-inspect-indicator-fade 800ms ease-out forwards;backdrop-filter:blur(4px)}.trae-browser-inspect-scroll-indicator svg{width:16px;height:16px;fill:#fff}.trae-browser-inspect-scroll-indicator.trae-scroll-up{top:12px;left:50%;transform:translateX(-50%)}.trae-browser-inspect-scroll-indicator.trae-scroll-down{bottom:12px;left:50%;transform:translateX(-50%)}.trae-browser-inspect-scroll-indicator.trae-scroll-left{left:12px;top:50%;transform:translateY(-50%)}.trae-browser-inspect-scroll-indicator.trae-scroll-right{right:12px;top:50%;transform:translateY(-50%)}@keyframes trae-browser-inspect-indicator-fade{0%{opacity:0;transform:translateX(-50%) scale(0.9)}15%{opacity:1;transform:translateX(-50%) scale(1)}85%{opacity:1}100%{opacity:0}}.trae-browser-inspect-scroll-indicator.trae-scroll-left,.trae-browser-inspect-scroll-indicator.trae-scroll-right{animation-name:trae-browser-inspect-indicator-fade-y}@keyframes trae-browser-inspect-indicator-fade-y{0%{opacity:0;transform:translateY(-50%) scale(0.9)}15%{opacity:1;transform:translateY(-50%) scale(1)}85%{opacity:1}100%{opacity:0}}.trae-browser-inspect-key-badge{position:fixed;bottom:60px;left:50%;transform:translateX(-50%);padding:8px 20px;border-radius:8px;background-color:rgba(0,0,0,.8);color:#fff;font-size:18px;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,monospace;pointer-events:none;z-index:999999;animation:trae-browser-inspect-key-pop 500ms ease-out forwards;backdrop-filter:blur(4px);border:1px solid hsla(0,0%,100%,.15);box-shadow:0 4px 12px rgba(0,0,0,.3);letter-spacing:1px}@keyframes trae-browser-inspect-key-pop{0%{opacity:0;transform:translateX(-50%) translateY(10px) scale(0.9)}20%{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}80%{opacity:1}100%{opacity:0;transform:translateX(-50%) translateY(-10px)}}.trae-browser-inspect-step-badge{position:fixed;top:12px;left:12px;padding:6px 12px;border-radius:6px;background-color:var(--vscode-icube-colorSuccessHover, #2FB287);color:#fff;font-size:12px;font-weight:600;pointer-events:none;z-index:999999;animation:trae-browser-inspect-step-slide 600ms ease-out forwards;box-shadow:0 2px 8px rgba(47,178,135,.3);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.trae-browser-inspect-step-badge.trae-step-old{opacity:.4;transform:translateY(0)}@keyframes trae-browser-inspect-step-slide{0%{opacity:0;transform:translateX(-20px)}20%{opacity:1;transform:translateX(0)}100%{opacity:1;transform:translateX(0)}}.trae-browser-inspect-drag-trail{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:999998}.trae-browser-inspect-drag-trail svg{width:100%;height:100%}.trae-browser-inspect-drag-trail .trae-drag-path{fill:none;stroke:var(--vscode-icube-colorSuccessHover, #2FB287);stroke-width:2;stroke-dasharray:8 4;opacity:.6;animation:trae-browser-inspect-dash 600ms linear forwards}.trae-browser-inspect-drag-trail .trae-drag-dot{fill:var(--vscode-icube-colorSuccessHover, #2FB287);filter:drop-shadow(0 0 4px rgba(47, 178, 135, 0.6))}.trae-browser-inspect-drag-trail .trae-drag-endpoint{fill:none;stroke:var(--vscode-icube-colorSuccessHover, #2FB287);stroke-width:2;opacity:.5}@keyframes trae-browser-inspect-dash{0%{stroke-dashoffset:200}100%{stroke-dashoffset:0}}.trae-browser-inspect-drag-trail.trae-drag-fade{animation:trae-browser-inspect-trail-fade 400ms ease-out forwards}@keyframes trae-browser-inspect-trail-fade{0%{opacity:1}100%{opacity:0}}</style><script type="module">(async () => {
+  try {
+    const client = await import('/@vite/client');
+    const hmr = client.createHotContext('hmr-handler/fake.js');
+    hmr.on('vite:afterUpdate', window['__ICUBE_WEBVIEW_HMR_CALLBACK_1786437470917']);
+  } catch {}
+})();</script><style>.buttonsCard-bTXa5j {
+  padding: var(--spacer-4);
+  background: none;
+  align-items: center;
+  gap: 0;
+  display: inline-flex;
+}
+
+.actionButton-opZL8g {
+  align-items: center;
+  gap: var(--spacer-4);
+  padding: var(--spacer-4) var(--spacer-8);
+  border-radius: var(--radius-4);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  background: none;
+  border: none;
+  display: inline-flex;
+}
+
+.actionButton-opZL8g:hover {
+  background: var(--bg-bg-overlay-l2);
+}
+
+.actionButton-opZL8g:active {
+  background: var(--bg-bg-overlay-l3);
+}
+
+.actionButton-opZL8g:focus-visible {
+  outline: 2px solid var(--status-primary-default);
+  outline-offset: 1px;
+}
+
+.icon-ObJEMt {
+  width: 16px;
+  height: 16px;
+  color: var(--icon-icon-default);
+  flex-shrink: 0;
+  justify-content: center;
+  align-items: center;
+  display: flex;
+}
+
+.title-GptGAg {
+  font-family: var(--font-family-default);
+  color: var(--text-text-default);
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.shortcut-nbwTG4 {
+  color: var(--icon-icon-secondary);
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  display: flex;
+}
+
+.shortcutKey-EE6xrE {
+  font-family: var(--font-family-default);
+  color: var(--icon-icon-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 12px;
+}
+
+.divider-cFGVKQ {
+  box-sizing: content-box;
+  background-clip: content-box;
+  background-color: var(--border-border-neutral-l2);
+  flex-shrink: 0;
+  width: 1px;
+  height: 12px;
+  padding: 0 6px;
+}
+
+</style><style>.commentEditorCard-Un4Xaa {
+  width: 320px;
+  padding: var(--spacing-sm);
+  background: none;
+  flex-direction: column;
+  display: flex;
+}
+
+.textContainer-ZISwbW {
+  padding: var(--spacing-sm);
+  background: var(--bg-bg-overlay-l1);
+  border: 1px solid var(--border-border-neutral-l3);
+  border-radius: var(--radius-sm);
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding-right: 0;
+  display: flex;
+}
+
+.textarea-ggj4j6 {
+  padding: 0 var(--spacing-sm) 0 2px;
+  font-family: var(--font-family-default);
+  color: var(--text-text-default);
+  resize: none;
+  scrollbar-width: thin;
+  scrollbar-color: #56637726 transparent;
+  background: none;
+  border: none;
+  outline: none;
+  flex: 1;
+  max-height: 140px;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 20px;
+  overflow-y: auto;
+}
+
+.textarea-ggj4j6::-webkit-scrollbar {
+  width: 6px;
+}
+
+.textarea-ggj4j6::-webkit-scrollbar-track {
+  background: none;
+}
+
+.textarea-ggj4j6::-webkit-scrollbar-thumb {
+  background: #56637726;
+  border-radius: 3px;
+}
+
+.textarea-ggj4j6::placeholder {
+  color: var(--text-text-tertiary);
+}
+
+.actionBar-u_t8vc {
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--spacing-xs);
+  opacity: 0;
+  max-height: 0;
+  transition: max-height .2s ease-out, opacity .2s ease-out, margin-top .2s ease-out;
+  display: flex;
+  overflow: hidden;
+}
+
+.actionBarVisible-PxXsje {
+  opacity: 1;
+  max-height: 32px;
+  margin-top: var(--spacing-sm);
+}
+
+.actionBarNoExpandAnimation-FCra2J {
+  transition: opacity .2s ease-out;
+}
+
+.actionBarNoExpandAnimation-FCra2J.actionBarVisible-PxXsje {
+  max-height: 32px;
+  margin-top: var(--spacing-sm);
+}
+
+.cancelButton-Lu0me9 {
+  height: 24px;
+  padding: 0 var(--spacing-xs);
+  background: var(--bg-bg-overlay-l2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  border: none;
+  justify-content: center;
+  align-items: center;
+  display: flex;
+}
+
+.cancelButton-Lu0me9:hover, .cancelButton-Lu0me9:active {
+  background: var(--bg-bg-overlay-l3);
+}
+
+.cancelButton-Lu0me9:focus-visible {
+  outline: 2px solid var(--status-primary-default);
+  outline-offset: 1px;
+}
+
+.cancelText-j1RS1q {
+  font-family: var(--font-family-default);
+  color: var(--text-text-default);
+  white-space: nowrap;
+  padding: 0 var(--spacing-xs);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.submitButton-BqyEd7 {
+  height: 24px;
+  padding: 0 var(--spacing-sm);
+  background: var(--bg-bg-invert);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  border: none;
+  justify-content: center;
+  align-items: center;
+  display: flex;
+}
+
+.submitButton-BqyEd7:hover:not(:disabled) {
+  background: var(--bg-bg-invert-hover);
+}
+
+.submitButton-BqyEd7:active:not(:disabled) {
+  background: var(--bg-bg-invert-active);
+}
+
+.submitButton-BqyEd7:disabled {
+  background: var(--bg-bg-invert-disabled);
+  color: var(--text-text-disabled);
+  cursor: not-allowed;
+}
+
+.submitButton-BqyEd7:focus-visible {
+  outline: 2px solid var(--status-primary-default);
+  outline-offset: 1px;
+}
+
+.submitText-N58QRq {
+  font-family: var(--font-family-default);
+  color: var(--text-text-onaccent);
+  white-space: nowrap;
+  padding: 0 var(--spacing-xs);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.submitButton-BqyEd7:disabled .submitText-N58QRq {
+  color: var(--text-text-disabled);
+}
+
+.submitIcon-vyKSKQ {
+  width: 12px;
+  height: 12px;
+  color: var(--icon-icon-onaccent);
+  flex-shrink: 0;
+  justify-content: center;
+  align-items: center;
+  display: flex;
+}
+
+.submitButton-BqyEd7:disabled .submitIcon-vyKSKQ {
+  color: var(--text-text-disabled);
+}
+
+.limitWarning-Hocj0v {
+  align-items: center;
+  gap: var(--spacing-xs);
+  color: var(--status-warning-default);
+  user-select: none;
+  flex: 1;
+  display: flex;
+}
+
+.limitText-hBXEaq {
+  font-family: var(--font-family-default);
+  color: var(--status-warning-default);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+</style><style>.previewCommentCardContainer-HEkpU8 {
+  border-radius: var(--radius-8);
+  background: var(--bg-bg-menu);
+  border: 1px solid var(--border-border-neutral-l1);
+  transition: width .25s cubic-bezier(.4, 0, .2, 1), height .25s cubic-bezier(.4, 0, .2, 1);
+  display: inline-block;
+  overflow: hidden;
+  box-shadow: 0 2px 6px #0003, 0 .5px #ffffff0f, inset 0 .5px #ffffff0f;
+}
+
+.previewCommentCardContent-ELaLah {
+  width: max-content;
+  position: relative;
+}
+
+.previewCommentCardFadeEnter-OMhMD9 {
+  opacity: 0;
+}
+
+.previewCommentCardFadeEnterActive-Eacuvn {
+  opacity: 1;
+  transition: opacity .2s ease-in;
+}
+
+.previewCommentCardFadeExit-ms9vgc {
+  opacity: 1;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+.previewCommentCardFadeExitActive-vyQTsd {
+  opacity: 0;
+  transition: opacity .15s ease-out;
+}
+
+.previewCommentCardSuccessCard-PWnm2o {
+  white-space: nowrap;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  display: flex;
+}
+
+.previewCommentCardSuccessIcon-Oht9Ir {
+  width: 16px;
+  height: 16px;
+  color: var(--status-success-default);
+  justify-content: center;
+  align-items: center;
+  display: flex;
+}
+
+.previewCommentCardSuccessText-s40BWG {
+  font-family: var(--font-family-default);
+  color: var(--text-text-default);
+  user-select: none;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+</style><style id="icube-theme-variables">:root {--vscode-foreground: #d1d3db;--vscode-disabledForeground: #666b75;--vscode-errorForeground: #cc4b53;--vscode-descriptionForeground: #9599a6;--vscode-icon-foreground: #9599a6;--vscode-focusBorder: rgba(0, 0, 0, 0);--vscode-textLink-foreground: #dadde5;--vscode-textLink-activeForeground: #979aa4;--vscode-textSeparator-foreground: rgba(255, 255, 255, 0.18);--vscode-textPreformat-foreground: #d7ba7d;--vscode-textPreformat-background: rgba(255, 255, 255, 0.1);--vscode-textBlockQuote-background: #222222;--vscode-textBlockQuote-border: rgba(0, 122, 204, 0.5);--vscode-textCodeBlock-background: rgba(10, 10, 10, 0.4);--vscode-sash-hoverBorder: #32f08c;--vscode-badge-background: #4d4d4d;--vscode-badge-foreground: #ffffff;--vscode-activityWarningBadge-foreground: #ffffff;--vscode-activityWarningBadge-background: #b27c00;--vscode-activityErrorBadge-foreground: #000000;--vscode-activityErrorBadge-background: #f14c4c;--vscode-scrollbar-shadow: #000000;--vscode-scrollbarSlider-background: rgba(121, 121, 121, 0.4);--vscode-scrollbarSlider-hoverBackground: rgba(100, 100, 100, 0.7);--vscode-scrollbarSlider-activeBackground: rgba(191, 191, 191, 0.4);--vscode-progressBar-background: #387bff;--vscode-chart-line: #236b8e;--vscode-chart-axis: rgba(191, 191, 191, 0.4);--vscode-chart-guide: rgba(191, 191, 191, 0.2);--vscode-editor-background: #1a1b1d;--vscode-editor-foreground: #d1d3db;--vscode-editorStickyScroll-background: #1a1b1d;--vscode-editorStickyScrollGutter-background: #1a1b1d;--vscode-editorStickyScrollHover-background: #292c34;--vscode-editorStickyScroll-shadow: #000000;--vscode-editorWidget-background: #252526;--vscode-editorWidget-foreground: #d1d3db;--vscode-editorWidget-border: #454545;--vscode-editorError-foreground: #f14c4c;--vscode-editorWarning-foreground: #cca700;--vscode-editorInfo-foreground: #59a4f9;--vscode-editorHint-foreground: rgba(238, 238, 238, 0.7);--vscode-editorLink-activeForeground: #387bff;--vscode-editor-selectionBackground: rgba(53, 121, 255, 0.28);--vscode-editor-inactiveSelectionBackground: #3a3d41;--vscode-editor-selectionHighlightBackground: rgba(173, 214, 255, 0.15);--vscode-editor-compositionBorder: #ffffff;--vscode-editor-findMatchBackground: #515c6a;--vscode-editor-findMatchHighlightBackground: rgba(218, 221, 229, 0.32);--vscode-editor-findRangeHighlightBackground: rgba(58, 61, 65, 0.4);--vscode-editor-hoverHighlightBackground: rgba(38, 79, 120, 0.25);--vscode-editorHoverWidget-background: #252526;--vscode-editorHoverWidget-foreground: #d1d3db;--vscode-editorHoverWidget-border: #454545;--vscode-editorHoverWidget-statusBarBackground: #2c2c2d;--vscode-editorInlayHint-foreground: #969696;--vscode-editorInlayHint-background: rgba(77, 77, 77, 0.1);--vscode-editorInlayHint-typeForeground: #969696;--vscode-editorInlayHint-typeBackground: rgba(77, 77, 77, 0.1);--vscode-editorInlayHint-parameterForeground: #969696;--vscode-editorInlayHint-parameterBackground: rgba(77, 77, 77, 0.1);--vscode-editorLightBulb-foreground: #ffcc00;--vscode-editorLightBulbAutoFix-foreground: #75beff;--vscode-editorLightBulbAi-foreground: #ffcc00;--vscode-editor-snippetTabstopHighlightBackground: rgba(124, 124, 124, 0.3);--vscode-editor-snippetFinalTabstopHighlightBorder: #525252;--vscode-diffEditor-insertedTextBackground: rgba(0, 165, 110, 0.28);--vscode-diffEditor-removedTextBackground: rgba(208, 42, 35, 0.28);--vscode-diffEditor-insertedLineBackground: rgba(0, 165, 110, 0.28);--vscode-diffEditor-removedLineBackground: rgba(208, 42, 35, 0.28);--vscode-diffEditor-diagonalFill: rgba(204, 204, 204, 0.2);--vscode-diffEditor-unchangedRegionBackground: #1a1b1d;--vscode-diffEditor-unchangedRegionForeground: #d1d3db;--vscode-diffEditor-unchangedCodeBackground: rgba(116, 116, 116, 0.16);--vscode-widget-shadow: rgba(0, 0, 0, 0.16);--vscode-widget-border: #303031;--vscode-toolbar-hoverBackground: rgba(224, 226, 242, 0.05);--vscode-toolbar-activeBackground: rgba(224, 226, 242, 0.08);--vscode-breadcrumb-foreground: rgba(209, 211, 219, 0.8);--vscode-breadcrumb-background: #1a1b1d;--vscode-breadcrumb-focusForeground: #e9eaee;--vscode-breadcrumb-activeSelectionForeground: #e9eaee;--vscode-breadcrumbPicker-background: #2a2d31;--vscode-merge-currentHeaderBackground: rgba(64, 200, 174, 0.5);--vscode-merge-currentContentBackground: rgba(64, 200, 174, 0.2);--vscode-merge-incomingHeaderBackground: rgba(64, 166, 255, 0.5);--vscode-merge-incomingContentBackground: rgba(64, 166, 255, 0.2);--vscode-merge-commonHeaderBackground: rgba(96, 96, 96, 0.4);--vscode-merge-commonContentBackground: rgba(96, 96, 96, 0.16);--vscode-editorOverviewRuler-currentContentForeground: rgba(64, 200, 174, 0.5);--vscode-editorOverviewRuler-incomingContentForeground: rgba(64, 166, 255, 0.5);--vscode-editorOverviewRuler-commonContentForeground: rgba(96, 96, 96, 0.4);--vscode-editorOverviewRuler-findMatchForeground: rgba(209, 134, 22, 0.49);--vscode-editorOverviewRuler-selectionHighlightForeground: rgba(160, 160, 160, 0.8);--vscode-problemsErrorIcon-foreground: #f14c4c;--vscode-problemsWarningIcon-foreground: #cca700;--vscode-problemsInfoIcon-foreground: #59a4f9;--vscode-minimap-findMatchHighlight: #d18616;--vscode-minimap-selectionOccurrenceHighlight: #676767;--vscode-minimap-selectionHighlight: #264f78;--vscode-minimap-infoHighlight: #59a4f9;--vscode-minimap-warningHighlight: #cca700;--vscode-minimap-errorHighlight: rgba(255, 18, 18, 0.7);--vscode-minimap-foregroundOpacity: #000000;--vscode-minimapSlider-background: rgba(121, 121, 121, 0.2);--vscode-minimapSlider-hoverBackground: rgba(100, 100, 100, 0.35);--vscode-minimapSlider-activeBackground: rgba(191, 191, 191, 0.2);--vscode-charts-foreground: #d1d3db;--vscode-charts-lines: rgba(209, 211, 219, 0.5);--vscode-charts-red: #f14c4c;--vscode-charts-blue: #59a4f9;--vscode-charts-yellow: #cca700;--vscode-charts-orange: #d18616;--vscode-charts-green: #89d185;--vscode-charts-purple: #b180d7;--vscode-input-background: rgba(224, 226, 242, 0.03);--vscode-input-foreground: #d1d3db;--vscode-inputOption-activeBorder: rgba(224, 226, 242, 0.18);--vscode-inputOption-hoverBackground: rgba(90, 93, 94, 0.5);--vscode-inputOption-activeBackground: rgba(0, 0, 0, 0);--vscode-inputOption-activeForeground: #ffffff;--vscode-input-placeholderForeground: #9599a6;--vscode-inputValidation-infoBackground: #063b49;--vscode-inputValidation-infoBorder: #007acc;--vscode-inputValidation-warningBackground: #352a05;--vscode-inputValidation-warningBorder: #dc8730;--vscode-inputValidation-errorBackground: #5a1d1d;--vscode-inputValidation-errorBorder: #f65a5a;--vscode-dropdown-background: #3c3c3c;--vscode-dropdown-foreground: #f0f0f0;--vscode-dropdown-border: #3c3c3c;--vscode-button-foreground: #000000;--vscode-button-separator: rgba(13, 14, 15, 0.18);--vscode-button-background: #d1d3db;--vscode-button-hoverBackground: #edeff2;--vscode-button-secondaryForeground: #ffffff;--vscode-button-secondaryBackground: #3a3d41;--vscode-button-secondaryHoverBackground: #45494e;--vscode-radio-activeForeground: #ffffff;--vscode-radio-activeBackground: rgba(0, 0, 0, 0);--vscode-radio-activeBorder: rgba(224, 226, 242, 0.18);--vscode-radio-inactiveBorder: rgba(255, 255, 255, 0.2);--vscode-radio-inactiveHoverBackground: rgba(90, 93, 94, 0.5);--vscode-checkbox-background: #3c3c3c;--vscode-checkbox-selectBackground: #252526;--vscode-checkbox-foreground: #f0f0f0;--vscode-checkbox-border: #6b6b6b;--vscode-checkbox-selectBorder: #9599a6;--vscode-checkbox-disabled.background: #777777;--vscode-checkbox-disabled.foreground: #b4b4b4;--vscode-keybindingLabel-background: rgba(128, 128, 128, 0.17);--vscode-keybindingLabel-foreground: #cccccc;--vscode-keybindingLabel-border: rgba(51, 51, 51, 0.6);--vscode-keybindingLabel-bottomBorder: rgba(68, 68, 68, 0.6);--vscode-list-focusOutline: rgba(0, 0, 0, 0);--vscode-list-activeSelectionBackground: rgba(224, 226, 242, 0.08);--vscode-list-activeSelectionForeground: #f5f9fe;--vscode-list-activeSelectionIconForeground: #ffffff;--vscode-list-inactiveSelectionBackground: rgba(224, 226, 242, 0.05);--vscode-list-inactiveSelectionForeground: #f5f9fe;--vscode-list-hoverBackground: rgba(224, 226, 242, 0.05);--vscode-list-dropBackground: rgba(53, 121, 255, 0.2);--vscode-list-dropBetweenBackground: #9599a6;--vscode-list-highlightForeground: #dadde5;--vscode-list-focusHighlightForeground: #dadde5;--vscode-list-invalidItemForeground: #b89500;--vscode-list-errorForeground: #cc4b53;--vscode-list-warningForeground: #cca700;--vscode-listFilterWidget-background: #222427;--vscode-listFilterWidget-outline: rgba(0, 0, 0, 0);--vscode-listFilterWidget-noMatchesOutline: #be1100;--vscode-listFilterWidget-shadow: rgba(0, 0, 0, 0.16);--vscode-list-filterMatchBackground: rgba(218, 221, 229, 0.32);--vscode-list-deemphasizedForeground: #8c8c8c;--vscode-tree-indentGuidesStroke: rgba(224, 226, 242, 0.09);--vscode-tree-inactiveIndentGuidesStroke: rgba(221, 226, 233, 0.08);--vscode-tree-tableColumnsBorder: rgba(204, 204, 204, 0.13);--vscode-tree-tableOddRowsBackground: rgba(209, 211, 219, 0.04);--vscode-editorActionList-background: #252526;--vscode-editorActionList-foreground: #d1d3db;--vscode-editorActionList-focusForeground: #f5f9fe;--vscode-editorActionList-focusBackground: rgba(224, 226, 242, 0.08);--vscode-menu-border: rgba(224, 226, 242, 0.09);--vscode-menu-foreground: #d1d3db;--vscode-menu-background: #2a2d31;--vscode-menu-selectionForeground: #f5f9fe;--vscode-menu-selectionBackground: rgba(224, 226, 242, 0.08);--vscode-menu-separatorBackground: rgba(224, 226, 242, 0.09);--vscode-quickInput-background: #202123;--vscode-quickInput-foreground: #d1d3db;--vscode-quickInputTitle-background: #222427;--vscode-pickerGroup-foreground: #d1d3db;--vscode-pickerGroup-border: rgba(224, 226, 242, 0.09);--vscode-quickInputList-focusForeground: #f5f9fe;--vscode-quickInputList-focusIconForeground: #ffffff;--vscode-quickInputList-focusBackground: rgba(224, 226, 242, 0.08);--vscode-search-resultsInfoForeground: #9599a6;--vscode-searchEditor-findMatchBackground: rgba(218, 221, 229, 0.21);--vscode-tab-activeBackground: rgba(224, 226, 242, 0.05);--vscode-tab-unfocusedActiveBackground: rgba(224, 226, 242, 0.05);--vscode-tab-inactiveBackground: #17191a;--vscode-tab-unfocusedInactiveBackground: #17191a;--vscode-tab-activeForeground: #f5f9fe;--vscode-tab-inactiveForeground: #9599a6;--vscode-tab-unfocusedActiveForeground: #d1d3db;--vscode-tab-unfocusedInactiveForeground: rgba(149, 153, 166, 0.5);--vscode-tab-border: rgba(224, 226, 242, 0.09);--vscode-tab-lastPinnedBorder: rgba(204, 204, 204, 0.2);--vscode-tab-activeBorder: #1a1b1d;--vscode-tab-unfocusedActiveBorder: rgba(26, 27, 29, 0.5);--vscode-tab-activeBorderTop: #ffffff;--vscode-tab-unfocusedActiveBorderTop: rgba(255, 255, 255, 0.5);--vscode-tab-selectedBorderTop: #ffffff;--vscode-tab-selectedBackground: #222222;--vscode-tab-selectedForeground: rgba(255, 255, 255, 0.63);--vscode-tab-dragAndDropBorder: #f5f9fe;--vscode-tab-activeModifiedBorder: #3399cc;--vscode-tab-inactiveModifiedBorder: rgba(51, 153, 204, 0.5);--vscode-tab-unfocusedActiveModifiedBorder: rgba(51, 153, 204, 0.5);--vscode-tab-unfocusedInactiveModifiedBorder: rgba(51, 153, 204, 0.25);--vscode-editorPane-background: #1a1b1d;--vscode-editorGroupHeader-tabsBackground: #17191a;--vscode-editorGroupHeader-tabsBorder: rgba(224, 226, 242, 0.09);--vscode-editorGroupHeader-noTabsBackground: #1a1b1d;--vscode-editorGroup-border: #444444;--vscode-editorGroup-dropBackground: rgba(53, 121, 255, 0.2);--vscode-editorGroup-dropIntoPromptForeground: #d1d3db;--vscode-editorGroup-dropIntoPromptBackground: #252526;--vscode-sideBySideEditor-horizontalBorder: #444444;--vscode-sideBySideEditor-verticalBorder: #444444;--vscode-panel-background: #1a1b1d;--vscode-panel-border: rgba(128, 128, 128, 0.35);--vscode-panelTitle-activeForeground: #f5f9fe;--vscode-panelTitle-inactiveForeground: #9599a6;--vscode-panelTitle-activeBorder: #f5f9fe;--vscode-panel-dropBorder: #f5f9fe;--vscode-panelSection-dropBackground: rgba(53, 121, 255, 0.2);--vscode-panelSectionHeader-background: rgba(128, 128, 128, 0.2);--vscode-panelSectionHeader-foreground: #f5f9fe;--vscode-panelSectionHeader-border: rgba(224, 226, 242, 0.13);--vscode-panelSection-border: rgba(128, 128, 128, 0.35);--vscode-panelStickyScroll-background: #1a1b1d;--vscode-panelStickyScroll-shadow: #000000;--vscode-banner-background: rgba(224, 226, 242, 0.08);--vscode-banner-foreground: #f5f9fe;--vscode-banner-iconForeground: #59a4f9;--vscode-statusBar-foreground: #ffffff;--vscode-statusBar-noFolderForeground: #ffffff;--vscode-statusBar-background: rgba(0, 0, 0, 0);--vscode-statusBar-noFolderBackground: rgba(0, 0, 0, 0);--vscode-statusBar-focusBorder: #ffffff;--vscode-statusBarItem-activeBackground: rgba(255, 255, 255, 0.18);--vscode-statusBarItem-focusBorder: #ffffff;--vscode-statusBarItem-hoverBackground: rgba(255, 255, 255, 0.12);--vscode-statusBarItem-hoverForeground: #ffffff;--vscode-statusBarItem-compactHoverBackground: rgba(255, 255, 255, 0.12);--vscode-statusBarItem-prominentForeground: #ffffff;--vscode-statusBarItem-prominentBackground: rgba(0, 0, 0, 0.5);--vscode-statusBarItem-prominentHoverForeground: #ffffff;--vscode-statusBarItem-prominentHoverBackground: rgba(255, 255, 255, 0.12);--vscode-statusBarItem-errorBackground: #82252b;--vscode-statusBarItem-errorForeground: #ffffff;--vscode-statusBarItem-errorHoverForeground: #ffffff;--vscode-statusBarItem-errorHoverBackground: rgba(255, 255, 255, 0.12);--vscode-statusBarItem-warningBackground: #7a6400;--vscode-statusBarItem-warningForeground: #ffffff;--vscode-statusBarItem-warningHoverForeground: #ffffff;--vscode-statusBarItem-warningHoverBackground: rgba(255, 255, 255, 0.12);--vscode-activityBar-background: #222427;--vscode-activityBar-foreground: #f5f9fe;--vscode-activityBar-inactiveForeground: #9599a6;--vscode-activityBar-activeBorder: #f5f9fe;--vscode-activityBar-dropBorder: #f5f9fe;--vscode-activityBarBadge-background: #387bff;--vscode-activityBarBadge-foreground: #ffffff;--vscode-activityBarTop-foreground: #e7e7e7;--vscode-activityBarTop-activeBorder: #e7e7e7;--vscode-activityBarTop-inactiveForeground: rgba(231, 231, 231, 0.6);--vscode-activityBarTop-dropBorder: #e7e7e7;--vscode-profileBadge-background: #4d4d4d;--vscode-profileBadge-foreground: #ffffff;--vscode-statusBarItem-remoteBackground: #16825d;--vscode-statusBarItem-remoteForeground: #ffffff;--vscode-statusBarItem-remoteHoverForeground: #ffffff;--vscode-statusBarItem-remoteHoverBackground: rgba(255, 255, 255, 0.12);--vscode-statusBarItem-offlineBackground: #6c1717;--vscode-statusBarItem-offlineForeground: #ffffff;--vscode-statusBarItem-offlineHoverForeground: #ffffff;--vscode-statusBarItem-offlineHoverBackground: rgba(255, 255, 255, 0.12);--vscode-extensionBadge-remoteBackground: #387bff;--vscode-extensionBadge-remoteForeground: #ffffff;--vscode-sideBar-background: #1a1b1d;--vscode-sideBarTitle-background: #1a1b1d;--vscode-sideBarTitle-foreground: #bbbbbb;--vscode-sideBar-dropBackground: rgba(53, 121, 255, 0.2);--vscode-sideBarSectionHeader-background: #1a1b1d;--vscode-sideBarSectionHeader-foreground: #d1d3db;--vscode-sideBarSectionHeader-border: rgba(224, 226, 242, 0.13);--vscode-sideBarActivityBarTop-border: rgba(224, 226, 242, 0.13);--vscode-sideBarStickyScroll-background: #1a1b1d;--vscode-sideBarStickyScroll-shadow: #000000;--vscode-titleBar-activeForeground: #9599a6;--vscode-titleBar-inactiveForeground: rgba(149, 153, 166, 0.6);--vscode-titleBar-activeBackground: #222427;--vscode-titleBar-inactiveBackground: #222427;--vscode-menubar-selectionForeground: #9599a6;--vscode-menubar-selectionBackground: rgba(224, 226, 242, 0.05);--vscode-commandCenter-foreground: #9599a6;--vscode-commandCenter-activeForeground: #9599a6;--vscode-commandCenter-inactiveForeground: rgba(149, 153, 166, 0.6);--vscode-commandCenter-background: rgba(255, 255, 255, 0.05);--vscode-commandCenter-activeBackground: rgba(255, 255, 255, 0.08);--vscode-commandCenter-border: rgba(149, 153, 166, 0.2);--vscode-commandCenter-activeBorder: rgba(149, 153, 166, 0.3);--vscode-commandCenter-inactiveBorder: rgba(149, 153, 166, 0.15);--vscode-notificationCenter-border: #303031;--vscode-notificationToast-border: #303031;--vscode-notifications-foreground: #d1d3db;--vscode-notifications-background: #2a2d31;--vscode-notificationLink-foreground: #dadde5;--vscode-notificationCenterHeader-background: #363a3f;--vscode-notifications-border: #363a3f;--vscode-notificationsErrorIcon-foreground: #f65a5a;--vscode-notificationsWarningIcon-foreground: #dc8730;--vscode-notificationsInfoIcon-foreground: #387bff;--vscode-icube-colorSnow: #ffffff;--vscode-icube-colorBlack: #000000;--vscode-icube-colorSnowDisable: rgba(255, 255, 255, 0.3);--vscode-icube-modalOverlay: rgba(0, 0, 0, 0.4);--vscode-icube-colorBg1: #1a1b1d;--vscode-icube-colorBg2: #222427;--vscode-icube-colorBg3: #2a2d31;--vscode-icube-colorBg4: #262626;--vscode-icube-diffColorBg3: rgba(40, 42, 46, 0.35);--vscode-icube-colorBgCode: #1a1b1d;--vscode-icube-colorBgTr0: rgba(224, 226, 242, 0.03);--vscode-icube-colorBtnHover: rgba(224, 226, 242, 0.05);--vscode-icube-colorBg5: rgba(194, 202, 242, 0.1);--vscode-icube-colorBtnHover2: rgba(224, 226, 242, 0.08);--vscode-icube-colorBtnTransparent3: rgba(224, 226, 242, 0.12);--vscode-icube-colorBlend: rgba(194, 202, 242, 0.15);--vscode-icube-colorTransparent: rgba(255, 255, 255, 0);--vscode-icube-colorWidgetShadow: rgba(0, 0, 0, 0.16);--vscode-icube-colorWidgetShadow2: rgba(0, 0, 0, 0.16);--vscode-icube-colorWidgetShadow3: rgba(0, 0, 0, 0.2);--vscode-icube-colorDefaultText: #d1d3db;--vscode-icube-colorHighlightText: #f5f9fe;--vscode-icube-colorGrayText: #9599a6;--vscode-icube-colorGrayText2: #737780;--vscode-icube-colorDisableText: #666b75;--vscode-icube-colorBlackText: #111314;--vscode-icube-colorBlackText1: #000000;--vscode-icube-colorBlackText2: #ffffff;--vscode-icube-colorDefaultAvatar: #dadde6;--vscode-icube-colorDefaultAvatarBackground: #24262b;--vscode-icube-modalLayoutBg: rgba(0, 0, 0, 0.4);--vscode-icube-colorIcon: #8d93a6;--vscode-icube-colorCodeCodeInstruction: #f0d8ff;--vscode-icube-colorLine1: rgba(224, 226, 242, 0.09);--vscode-icube-colorLine2: rgba(224, 226, 242, 0.13);--vscode-icube-colorLine3: rgba(224, 226, 242, 0.18);--vscode-icube-colorBrand: #dadde5;--vscode-icube-colorBrandHover: #edeff2;--vscode-icube-colorBrandActive: #979aa4;--vscode-icube-colorBrandTransparent: rgba(224, 226, 242, 0.05);--vscode-icube-colorBrandTransparent2: rgba(224, 226, 242, 0.08);--vscode-icube-colorBrandTransparent3: rgba(224, 226, 242, 0.12);--vscode-icube-colorStatusRegular: #387bff;--vscode-icube-colorStatusRegularHover: #4c88ff;--vscode-icube-colorStatusRegularActive: #1759dd;--vscode-icube-colorStatusRegularTransparent: rgba(53, 121, 255, 0.18);--vscode-icube-colorStatusRegularTransparent2: rgba(53, 121, 255, 0.28);--vscode-icube-colorStatusRegularTransparent3: rgba(53, 121, 255, 0.36);--vscode-icube-colorSuccess: #33c192;--vscode-icube-colorSuccessHover: #5ed4ad;--vscode-icube-colorSuccessActive: #27b082;--vscode-icube-colorSuccessTransparent: rgba(0, 165, 110, 0.18);--vscode-icube-colorSuccessTransparent2: rgba(0, 165, 110, 0.28);--vscode-icube-colorSuccessTransparent3: rgba(0, 165, 110, 0.36);--vscode-icube-colorError: #f65a5a;--vscode-icube-colorErrorHover: #f86262;--vscode-icube-colorErrorActive: #ad2020;--vscode-icube-colorErrorTransparent: rgba(208, 42, 35, 0.18);--vscode-icube-colorErrorTransparent2: rgba(208, 42, 35, 0.28);--vscode-icube-colorErrorTransparent3: rgba(208, 42, 35, 0.36);--vscode-icube-colorWarning: #dc8730;--vscode-icube-colorWarningHover: #f1a03f;--vscode-icube-colorWarningActive: #c0701d;--vscode-icube-colorWarningTransparent: rgba(220, 135, 48, 0.16);--vscode-icube-colorWarningTransparent2: rgba(220, 135, 48, 0.28);--vscode-icube-colorWarningTransparent3: rgba(220, 135, 48, 0.36);--vscode-icube-colorAlert: #c2a857;--vscode-icube-colorAlertHover: #deb245;--vscode-icube-colorAlertActive: #ab9220;--vscode-icube-colorAlertTransparent: rgba(194, 168, 87, 0.16);--vscode-icube-colorAlertTransparent2: rgba(194, 168, 87, 0.28);--vscode-icube-colorAlertTransparent3: rgba(194, 168, 87, 0.36);--vscode-icube-colorErrorTm1: rgba(204, 75, 83, 0.2);--vscode-icube-colorErrorTr1: rgba(208, 42, 35, 0.18);--vscode-icube-colorSpinLoading: #2f74ff;--vscode-icube-colorC1: #2dd288;--vscode-icube-colorC2: #ff9392;--vscode-icube-colorC3: #dcb364;--vscode-icube-colorC4: #8acb3a;--vscode-icube-colorC5: #04cbe5;--vscode-icube-colorC6: #7bb8ff;--vscode-icube-colorC7: #ec93ff;--vscode-icube-colorC8: #bfa5ff;--vscode-icube-colorC9: #afb9cf;--vscode-icube-colorDiffToggleBtnBg: #8d7aff;--vscode-icube-textPreformatBackground: #9d89eb;--vscode-icube-colorRed1: rgba(221, 55, 48, 0.5);--vscode-icube-colorRed2: rgba(221, 55, 48, 0.1);--vscode-icube-colorRed3: #dd3730;--vscode-icube-colorGreen1: #016a51;--vscode-icube-colorDiffBtn1: #ffffff;--vscode-icube-diffInsertedTextBackground: rgba(38, 165, 123, 0.32);--vscode-icube-colorChatError: rgba(221, 55, 48, 0.5);--vscode-icube-chatIconBg1: #ffffff;--vscode-icube-chatIconColor1: #ff4a36;--vscode-icube-emptyExplorerButtonBgColor: rgba(194, 202, 242, 0.1);--vscode-icube-emptyExplorerButtonTextColor: #dadde5;--vscode-icube-emptyExplorerSplitTextColor: #737780;--vscode-icube-emptyExplorerSplitColor: rgba(221, 226, 233, 0.16);--vscode-icube-lite.colorBg1: #25252d;--vscode-icube-lite.colorBg2: #1d1c23;--vscode-icube-lite.colorLine1: #2e2e38;--vscode-widget-shadow1: rgba(0, 0, 0, 0.16);--vscode-widget-shadow2: rgba(0, 0, 0, 0.1);--vscode-widget-light.shadow1: rgba(0, 0, 0, 0.04);--vscode-widget-light.shadow2: rgba(0, 0, 0, 0.08);--vscode-icube-tooltipsTextColor: #181a1f;--vscode-icube-ai.disableInputBorderColor: rgba(194, 202, 242, 0.24);--vscode-icube-scrollbarBgColor: rgba(221, 226, 233, 0.25);--vscode-icube-scrollbarHoverBgColor: rgba(221, 226, 233, 0.35);--vscode-icube-desktopEmptyWorkspaceIconBg: rgba(194, 202, 242, 0.1);--vscode-icube-desktopEmptyWorkspaceHoverBg: rgba(194, 202, 242, 0.15);--vscode-icube--code-code-text: #e0e3ee;--vscode-icube-primaryButtonBackground: #d1d3db;--vscode-icube-primaryButtonForeground: #000000;--vscode-icube-primaryButtonHoverBackground: #edeff2;--vscode-icube-primaryButtonHoverForeground: #000000;--vscode-icube-primaryButtonActivateBackground: #979aa4;--vscode-icube-primaryButtonActivateForeground: #000000;--vscode-icube-primaryButtonDisableBackground: #666b75;--vscode-icube-primaryButtonDisableForeground: #000000;--vscode-icube-defaultButtonBackground: rgba(224, 226, 242, 0.05);--vscode-icube-defaultButtonForeground: #d1d3db;--vscode-icube-defaultButtonHoverBackground: rgba(224, 226, 242, 0.08);--vscode-icube-defaultButtonHoverForeground: #d1d3db;--vscode-icube-defaultButtonActivateBackground: rgba(224, 226, 242, 0.12);--vscode-icube-defaultButtonActivateForeground: #d1d3db;--vscode-icube-defaultButtonDisableBackground: rgba(224, 226, 242, 0.08);--vscode-icube-defaultButtonDisableForeground: #666b75;--vscode-icube-checkboxBorder: #d1d3db;--vscode-icube-checkboxBackground: #d1d3db;--vscode-icube-checkboxDisabledBackground: #666b75;--vscode-icube-checkboxForeground: #000000;--vscode-icube-checkboxUncheckedBorder: rgba(224, 226, 242, 0.18);--vscode-icube-checkboxUncheckedBackground: #1a1b1d;--vscode-icube-badgeBackground: #387bff;--vscode-icube-badgeForeground: #ffffff;--vscode-icube-colorBgTr1: rgba(224, 226, 242, 0.05);--vscode-icube-colorBgTr2: rgba(224, 226, 242, 0.08);--vscode-icube-colorBgTr3: rgba(224, 226, 242, 0.12);--vscode-icube-colorTextDefault: #d1d3db;--vscode-icube-colorTextHighlight: #f5f9fe;--vscode-icube-colorTextGray: #9599a6;--vscode-icube-colorTextDisable: #666b75;--vscode-icube-colorBrandTr1: rgba(224, 226, 242, 0.05);--vscode-icube-colorBrandTr2: rgba(224, 226, 242, 0.08);--vscode-icube-colorBrandTr3: rgba(224, 226, 242, 0.12);--vscode-icube-colorSuccessTr1: rgba(0, 165, 110, 0.18);--vscode-icube-colorSuccessTr2: rgba(0, 165, 110, 0.28);--vscode-icube-colorSuccessTr3: rgba(0, 165, 110, 0.36);--vscode-icube-colorErrorTr2: rgba(208, 42, 35, 0.28);--vscode-icube-colorErrorTr3: rgba(208, 42, 35, 0.36);--vscode-icube-colorWarningTr1: rgba(220, 135, 48, 0.16);--vscode-icube-colorWarningTr2: rgba(220, 135, 48, 0.28);--vscode-icube-colorWarningTr3: rgba(220, 135, 48, 0.36);--vscode-icube-colorAlertTr1: rgba(194, 168, 87, 0.16);--vscode-icube-colorAlertTr2: rgba(194, 168, 87, 0.28);--vscode-icube-colorAlertTr3: rgba(194, 168, 87, 0.36);--vscode-icube-colorTextButtonHighlight: #f5f9fe;--vscode-icube--special-white: #ffffff;--vscode-icube--special-black: #000000;--vscode-icube--bg-bg-base-default: #1a1b1d;--vscode-icube--bg-bg-tooltip: #1a1b1d;--vscode-icube--bg-bg-base-secondary: #222427;--vscode-icube--bg-bg-base-tertiary: #2a2d31;--vscode-icube--bg-bg-overlay-l1: rgba(224, 226, 242, 0.03);--vscode-icube--bg-bg-overlay-l2: rgba(224, 226, 242, 0.05);--vscode-icube--bg-bg-overlay-l3: rgba(224, 226, 242, 0.08);--vscode-icube--bg-bg-overlay-l4: rgba(224, 226, 242, 0.12);--vscode-icube--border-border-neutral-l1: rgba(224, 226, 242, 0.09);--vscode-icube--border-border-neutral-l2: rgba(224, 226, 242, 0.13);--vscode-icube--border-border-neutral-l3: rgba(224, 226, 242, 0.18);--vscode-icube--text-text-default-hover: #f5f9fe;--vscode-icube--text-text-default-active: #f5f9fe;--vscode-icube--icon-icon-default-hover: #f5f9fe;--vscode-icube--icon-icon-default-active: #f5f9fe;--vscode-icube--text-text-default: #d1d3db;--vscode-icube--text-text-secondary-hover: #d1d3db;--vscode-icube--text-text-secondary-active: #d1d3db;--vscode-icube--icon-icon-default: #d1d3db;--vscode-icube--icon-icon-secondary-hover: #d1d3db;--vscode-icube--icon-icon-secondary-active: #d1d3db;--vscode-icube--text-text-secondary: #9599a6;--vscode-icube--icon-icon-secondary: #9599a6;--vscode-icube--text-text-tertiary: #666b75;--vscode-icube--text-text-disabled: #666b75;--vscode-icube--icon-icon-tertiary: #666b75;--vscode-icube--icon-icon-disabled: #666b75;--vscode-icube--status-primary-default: #387bff;--vscode-icube--status-primary-hover: #4c88ff;--vscode-icube--status-primary-active: #1759dd;--vscode-icube--status-primary-surface-l1: rgba(53, 121, 255, 0.18);--vscode-icube--status-primary-surface-l2: rgba(53, 121, 255, 0.28);--vscode-icube--status-primary-surface-l3: rgba(53, 121, 255, 0.36);--vscode-icube--status-success-default: #33c192;--vscode-icube--status-success-hover: #5ed4ad;--vscode-icube--status-success-active: #27b082;--vscode-icube--status-success-surface-l1: rgba(0, 165, 110, 0.18);--vscode-icube--status-success-surface-l2: rgba(0, 165, 110, 0.28);--vscode-icube--status-success-surface-l3: rgba(0, 165, 110, 0.36);--vscode-icube--status-alert-default: #c2a857;--vscode-icube--status-alert-hover: #deb245;--vscode-icube--status-alert-active: #ab9220;--vscode-icube--status-alert-surface-l1: rgba(194, 168, 87, 0.16);--vscode-icube--status-alert-surface-l2: rgba(194, 168, 87, 0.28);--vscode-icube--status-alert-surface-l3: rgba(194, 168, 87, 0.36);--vscode-icube--status-warning-default: #dc8730;--vscode-icube--status-warning-hover: #f1a03f;--vscode-icube--status-warning-active: #c0701d;--vscode-icube--status-warning-surface-l1: rgba(220, 135, 48, 0.16);--vscode-icube--status-warning-surface-l2: rgba(220, 135, 48, 0.28);--vscode-icube--status-warning-surface-l3: rgba(220, 135, 48, 0.36);--vscode-icube--status-error-default: #f65a5a;--vscode-icube--status-error-hover: #f86262;--vscode-icube--status-error-active: #ad2020;--vscode-icube--status-error-surface-l1: rgba(208, 42, 35, 0.18);--vscode-icube--status-error-surface-l2: rgba(208, 42, 35, 0.28);--vscode-icube--status-error-surface-l3: rgba(208, 42, 35, 0.36);--vscode-icube--bg-bg-invert: #dadde5;--vscode-icube--bg-bg-invert-hover: #edeff2;--vscode-icube--bg-bg-invert-active: #979aa4;--vscode-icube--bg-bg-invert-disabled: rgba(224, 226, 242, 0.12);--vscode-icube--accent-accent-teal: #2dd288;--vscode-icube--accent-accent-coral: #ff9392;--vscode-icube--accent-accent-amber: #dcb364;--vscode-icube--accent-accent-lime: #8acb3a;--vscode-icube--accent-accent-cyan: #04cbe5;--vscode-icube--accent-accent-blue: #7bb8ff;--vscode-icube--accent-accent-magenta: #ec93ff;--vscode-icube--accent-accent-violet: #bfa5ff;--vscode-icube--accent-accent-slate: #afb9cf;--vscode-icube--bg-bg-menu: #202123;--vscode-icube--bg-bg-menu-tr0: rgba(42, 45, 49, 0);--vscode-icube--bg-bg-brand: #32f08c;--vscode-icube--bg-bg-brand-hover: #0fdc78;--vscode-icube--bg-bg-brand-disabled: rgba(50, 240, 140, 0.2);--vscode-icube--border-border-contrast: #ffffff;--vscode-icube--border-border-brand: #32f08c;--vscode-icube--text-text-brand: #32f08c;--vscode-icube--icon-icon-brand: #32f08c;--vscode-icube--text-text-brand-hover: #0fdc78;--vscode-icube--icon-icon-brand-hover: #0fdc78;--vscode-icube--text-text-onbrand: #0c0c0d;--vscode-icube--icon-icon-onbrand: #0c0c0d;--vscode-icube--text-text-onaccent: #0c0c0d;--vscode-icube--icon-icon-onaccent: #0c0c0d;--vscode-icube--special-bgtabsoverlay: rgba(13, 14, 15, 0.18);--vscode-icube--code-code-tag: #f2858c;--vscode-icube--code-code-instruction: #f0d8ff;--vscode-icube--code-code-doc: #7f838c;--vscode-icube--code-code-parameter: #82d99f;--vscode-icube--cue: #0fdc78;--vscode-icube--cue-tr0: rgba(15, 220, 120, 0);--vscode-icube--cue-tr1: rgba(15, 220, 120, 0.16);--vscode-icube--cue-tr2: rgba(15, 220, 120, 0.32);--vscode-icube--cue-diff-add: #00a56e;--vscode-icube--cue-diff-add-inline: rgba(0, 165, 110, 0.12);--vscode-icube--cue-diff-add-popup: rgba(0, 165, 110, 0.18);--vscode-icube--cue-diff-remove: rgba(246, 70, 70, 0.14);--vscode-icube--cue-diff-line: rgba(255, 255, 255, 0.32);--vscode-solo-lite-root-background: #1a1b1d;--vscode-icube-memoryRiskBackground: #453121;--vscode-icube-memoryRiskBorder: #6b4d35;--vscode-icube-memoryRiskIcon: #d27e24;--vscode-icube-blendColor.btnHover.bg2: #33363e;--vscode-icube-blendColor.btnTransparent3.bg2: #434652;--vscode-editor-lineHighlightBackground: #292c34;--vscode-editor-inactiveLineHighlightBackground: #292c34;--vscode-editor-lineHighlightBorder: #282828;--vscode-editor-rangeHighlightBackground: rgba(255, 255, 255, 0.04);--vscode-editor-symbolHighlightBackground: rgba(218, 221, 229, 0.32);--vscode-editorCursor-foreground: #ffffff;--vscode-editorMultiCursor-primary.foreground: #ffffff;--vscode-editorMultiCursor-secondary.foreground: #ffffff;--vscode-editorWhitespace-foreground: rgba(227, 228, 226, 0.16);--vscode-editorLineNumber-foreground: #979aa4;--vscode-editorIndentGuide-background: rgba(227, 228, 226, 0.16);--vscode-editorIndentGuide-activeBackground: rgba(227, 228, 226, 0.16);--vscode-editorIndentGuide-background1: rgba(224, 226, 242, 0.09);--vscode-editorIndentGuide-background2: rgba(0, 0, 0, 0);--vscode-editorIndentGuide-background3: rgba(0, 0, 0, 0);--vscode-editorIndentGuide-background4: rgba(0, 0, 0, 0);--vscode-editorIndentGuide-background5: rgba(0, 0, 0, 0);--vscode-editorIndentGuide-background6: rgba(0, 0, 0, 0);--vscode-editorIndentGuide-activeBackground1: rgba(224, 226, 242, 0.18);--vscode-editorIndentGuide-activeBackground2: rgba(0, 0, 0, 0);--vscode-editorIndentGuide-activeBackground3: rgba(0, 0, 0, 0);--vscode-editorIndentGuide-activeBackground4: rgba(0, 0, 0, 0);--vscode-editorIndentGuide-activeBackground5: rgba(0, 0, 0, 0);--vscode-editorIndentGuide-activeBackground6: rgba(0, 0, 0, 0);--vscode-editorActiveLineNumber-foreground: #c6c6c6;--vscode-editorLineNumber-activeForeground: #e0e3ee;--vscode-editorRuler-foreground: #5a5a5a;--vscode-editorCodeLens-foreground: #999999;--vscode-editorBracketMatch-background: rgba(213, 216, 224, 0.24);--vscode-editorBracketMatch-border: rgba(213, 216, 224, 0);--vscode-editorOverviewRuler-border: rgba(127, 127, 127, 0.3);--vscode-editorGutter-background: #1a1b1d;--vscode-editorUnnecessaryCode-opacity: rgba(0, 0, 0, 0.5);--vscode-editorGhostText-foreground: rgba(255, 255, 255, 0.34);--vscode-editorOverviewRuler-rangeHighlightForeground: rgba(0, 122, 204, 0.6);--vscode-editorOverviewRuler-errorForeground: rgba(255, 18, 18, 0.7);--vscode-editorOverviewRuler-warningForeground: #cca700;--vscode-editorOverviewRuler-infoForeground: #59a4f9;--vscode-editorBracketHighlight-foreground1: #ffd700;--vscode-editorBracketHighlight-foreground2: #da70d6;--vscode-editorBracketHighlight-foreground3: #179fff;--vscode-editorBracketHighlight-foreground4: rgba(0, 0, 0, 0);--vscode-editorBracketHighlight-foreground5: rgba(0, 0, 0, 0);--vscode-editorBracketHighlight-foreground6: rgba(0, 0, 0, 0);--vscode-editorBracketHighlight-unexpectedBracket.foreground: rgba(255, 18, 18, 0.8);--vscode-editorBracketPairGuide-background1: rgba(224, 226, 242, 0.09);--vscode-editorBracketPairGuide-background2: rgba(224, 226, 242, 0.09);--vscode-editorBracketPairGuide-background3: rgba(224, 226, 242, 0.09);--vscode-editorBracketPairGuide-background4: rgba(224, 226, 242, 0.09);--vscode-editorBracketPairGuide-background5: rgba(224, 226, 242, 0.09);--vscode-editorBracketPairGuide-background6: rgba(224, 226, 242, 0.09);--vscode-editorBracketPairGuide-activeBackground1: rgba(0, 0, 0, 0);--vscode-editorBracketPairGuide-activeBackground2: rgba(0, 0, 0, 0);--vscode-editorBracketPairGuide-activeBackground3: rgba(0, 0, 0, 0);--vscode-editorBracketPairGuide-activeBackground4: rgba(0, 0, 0, 0);--vscode-editorBracketPairGuide-activeBackground5: rgba(0, 0, 0, 0);--vscode-editorBracketPairGuide-activeBackground6: rgba(0, 0, 0, 0);--vscode-editorUnicodeHighlight-border: #cca700;--vscode-diffEditor-move.border: rgba(139, 139, 139, 0.61);--vscode-diffEditor-moveActive.border: #ffa500;--vscode-diffEditor-unchangedRegionShadow: #000000;--vscode-settings-headerForeground: #f5f9fe;--vscode-settings-settingsHeaderHoverForeground: rgba(245, 249, 254, 0.7);--vscode-settings-modifiedItemIndicator: #dadde5;--vscode-settings-headerBorder: rgba(224, 226, 242, 0.13);--vscode-settings-sashBorder: rgba(128, 128, 128, 0.35);--vscode-settings-dropdownBackground: #2a2d31;--vscode-settings-dropdownForeground: #f0f0f0;--vscode-settings-dropdownBorder: rgba(224, 226, 242, 0.09);--vscode-settings-dropdownListBorder: #454545;--vscode-settings-checkboxBackground: #3c3c3c;--vscode-settings-checkboxForeground: #f0f0f0;--vscode-settings-checkboxBorder: #6b6b6b;--vscode-settings-textInputBackground: rgba(224, 226, 242, 0.03);--vscode-settings-textInputForeground: #d1d3db;--vscode-settings-numberInputBackground: rgba(224, 226, 242, 0.03);--vscode-settings-numberInputForeground: #d1d3db;--vscode-settings-focusedRowBackground: rgba(224, 226, 242, 0.03);--vscode-settings-rowHoverBackground: rgba(224, 226, 242, 0.01);--vscode-settings-focusedRowBorder: rgba(0, 0, 0, 0);--vscode-editorOverviewRuler-bracketMatchForeground: #a0a0a0;--vscode-actionBar-toggledBackground: #383a49;--vscode-symbolIcon-arrayForeground: #d1d3db;--vscode-symbolIcon-booleanForeground: #d1d3db;--vscode-symbolIcon-classForeground: #ee9d28;--vscode-symbolIcon-colorForeground: #d1d3db;--vscode-symbolIcon-constantForeground: #d1d3db;--vscode-symbolIcon-constructorForeground: #b180d7;--vscode-symbolIcon-enumeratorForeground: #ee9d28;--vscode-symbolIcon-enumeratorMemberForeground: #75beff;--vscode-symbolIcon-eventForeground: #ee9d28;--vscode-symbolIcon-fieldForeground: #75beff;--vscode-symbolIcon-fileForeground: #d1d3db;--vscode-symbolIcon-folderForeground: #d1d3db;--vscode-symbolIcon-functionForeground: #b180d7;--vscode-symbolIcon-interfaceForeground: #75beff;--vscode-symbolIcon-keyForeground: #d1d3db;--vscode-symbolIcon-keywordForeground: #d1d3db;--vscode-symbolIcon-methodForeground: #b180d7;--vscode-symbolIcon-moduleForeground: #d1d3db;--vscode-symbolIcon-namespaceForeground: #d1d3db;--vscode-symbolIcon-nullForeground: #d1d3db;--vscode-symbolIcon-numberForeground: #d1d3db;--vscode-symbolIcon-objectForeground: #d1d3db;--vscode-symbolIcon-operatorForeground: #d1d3db;--vscode-symbolIcon-packageForeground: #d1d3db;--vscode-symbolIcon-propertyForeground: #d1d3db;--vscode-symbolIcon-referenceForeground: #d1d3db;--vscode-symbolIcon-snippetForeground: #d1d3db;--vscode-symbolIcon-stringForeground: #d1d3db;--vscode-symbolIcon-structForeground: #d1d3db;--vscode-symbolIcon-textForeground: #d1d3db;--vscode-symbolIcon-typeParameterForeground: #d1d3db;--vscode-symbolIcon-unitForeground: #d1d3db;--vscode-symbolIcon-variableForeground: #75beff;--vscode-peekViewTitle-background: #252526;--vscode-peekViewTitleLabel-foreground: #ffffff;--vscode-peekViewTitleDescription-foreground: rgba(204, 204, 204, 0.7);--vscode-peekView-border: #59a4f9;--vscode-peekViewResult-background: #252526;--vscode-peekViewResult-lineForeground: #bbbbbb;--vscode-peekViewResult-fileForeground: #ffffff;--vscode-peekViewResult-selectionBackground: rgba(51, 153, 255, 0.2);--vscode-peekViewResult-selectionForeground: #ffffff;--vscode-peekViewEditor-background: #001f33;--vscode-peekViewEditorGutter-background: #001f33;--vscode-peekViewEditorStickyScroll-background: #001f33;--vscode-peekViewEditorStickyScrollGutter-background: #001f33;--vscode-peekViewResult-matchHighlightBackground: rgba(234, 92, 0, 0.3);--vscode-peekViewEditor-matchHighlightBackground: rgba(255, 143, 0, 0.6);--vscode-editorMarkerNavigationError-background: #f14c4c;--vscode-editorMarkerNavigationError-headerBackground: rgba(241, 76, 76, 0.1);--vscode-editorMarkerNavigationWarning-background: #cca700;--vscode-editorMarkerNavigationWarning-headerBackground: rgba(204, 167, 0, 0.1);--vscode-editorMarkerNavigationInfo-background: #59a4f9;--vscode-editorMarkerNavigationInfo-headerBackground: rgba(89, 164, 249, 0.1);--vscode-editorMarkerNavigation-background: #1a1b1d;--vscode-editor-foldBackground: rgba(53, 121, 255, 0.08);--vscode-editor-foldPlaceholderForeground: #808080;--vscode-editorGutter-foldingControlForeground: #9599a6;--vscode-editorSuggestWidget-background: #252526;--vscode-editorSuggestWidget-border: #454545;--vscode-editorSuggestWidget-foreground: #d1d3db;--vscode-editorSuggestWidget-selectedForeground: #f5f9fe;--vscode-editorSuggestWidget-selectedIconForeground: #ffffff;--vscode-editorSuggestWidget-selectedBackground: rgba(224, 226, 242, 0.08);--vscode-editorSuggestWidget-highlightForeground: #dadde5;--vscode-editorSuggestWidget-focusHighlightForeground: #dadde5;--vscode-editorSuggestWidgetStatus-foreground: rgba(209, 211, 219, 0.5);--vscode-inlineEdit-originalBackground: rgba(208, 42, 35, 0.06);--vscode-inlineEdit-modifiedBackground: rgba(0, 165, 110, 0.08);--vscode-inlineEdit-originalChangedLineBackground: rgba(208, 42, 35, 0.22);--vscode-inlineEdit-originalChangedTextBackground: rgba(208, 42, 35, 0.22);--vscode-inlineEdit-modifiedChangedLineBackground: rgba(0, 165, 110, 0.2);--vscode-inlineEdit-modifiedChangedTextBackground: rgba(0, 165, 110, 0.2);--vscode-inlineEdit-gutterIndicator.primaryForeground: #000000;--vscode-inlineEdit-gutterIndicator.primaryBorder: #d1d3db;--vscode-inlineEdit-gutterIndicator.primaryBackground: rgba(209, 211, 219, 0.4);--vscode-inlineEdit-gutterIndicator.secondaryForeground: #ffffff;--vscode-inlineEdit-gutterIndicator.secondaryBorder: #3a3d41;--vscode-inlineEdit-gutterIndicator.secondaryBackground: #3a3d41;--vscode-inlineEdit-gutterIndicator.successfulForeground: #000000;--vscode-inlineEdit-gutterIndicator.successfulBorder: #d1d3db;--vscode-inlineEdit-gutterIndicator.successfulBackground: #d1d3db;--vscode-inlineEdit-gutterIndicator.background: rgba(23, 25, 26, 0.5);--vscode-inlineEdit-originalBorder: rgba(208, 42, 35, 0.28);--vscode-inlineEdit-modifiedBorder: rgba(0, 165, 110, 0.28);--vscode-inlineEdit-tabWillAcceptModifiedBorder: rgba(0, 165, 110, 0.28);--vscode-inlineEdit-tabWillAcceptOriginalBorder: rgba(208, 41, 35, 0.28);--vscode-editor-linkedEditingBackground: rgba(255, 0, 0, 0.3);--vscode-editor-wordHighlightBackground: rgba(87, 87, 87, 0.72);--vscode-editor-wordHighlightStrongBackground: rgba(0, 73, 114, 0.72);--vscode-editor-wordHighlightTextBackground: rgba(87, 87, 87, 0.72);--vscode-editorOverviewRuler-wordHighlightForeground: rgba(160, 160, 160, 0.8);--vscode-editorOverviewRuler-wordHighlightStrongForeground: rgba(192, 160, 192, 0.8);--vscode-editorOverviewRuler-wordHighlightTextForeground: rgba(160, 160, 160, 0.8);--vscode-editorHoverWidget-highlightForeground: #dadde5;--vscode-editor-placeholder.foreground: rgba(255, 255, 255, 0.34);--vscode-editorGutter-modifiedBackground: #1b81a8;--vscode-editorGutter-modifiedSecondaryBackground: #0d4054;--vscode-editorGutter-addedBackground: #487e02;--vscode-editorGutter-addedSecondaryBackground: #243f01;--vscode-editorGutter-deletedBackground: #f14c4c;--vscode-editorGutter-deletedSecondaryBackground: #b00e0e;--vscode-minimapGutter-modifiedBackground: #1b81a8;--vscode-minimapGutter-addedBackground: #487e02;--vscode-minimapGutter-deletedBackground: #f14c4c;--vscode-editorOverviewRuler-modifiedForeground: rgba(27, 129, 168, 0.6);--vscode-editorOverviewRuler-addedForeground: rgba(72, 126, 2, 0.6);--vscode-editorOverviewRuler-deletedForeground: rgba(241, 76, 76, 0.6);--vscode-editorGutter-itemGlyphForeground: #d1d3db;--vscode-editorGutter-itemBackground: #242527;--vscode-agentSessionReadIndicator-foreground: rgba(209, 211, 219, 0.15);--vscode-terminal-foreground: #cccccc;--vscode-terminal-selectionBackground: rgba(53, 121, 255, 0.28);--vscode-terminal-inactiveSelectionBackground: #3a3d41;--vscode-terminalCommandDecoration-defaultBackground: rgba(255, 255, 255, 0.25);--vscode-terminalCommandDecoration-successBackground: #1b81a8;--vscode-terminalCommandDecoration-errorBackground: #f14c4c;--vscode-terminalOverviewRuler-cursorForeground: rgba(160, 160, 160, 0.8);--vscode-terminal-border: rgba(128, 128, 128, 0.35);--vscode-terminalOverviewRuler-border: rgba(127, 127, 127, 0.3);--vscode-terminal-findMatchBackground: #515c6a;--vscode-terminal-hoverHighlightBackground: rgba(38, 79, 120, 0.13);--vscode-terminal-findMatchHighlightBackground: rgba(218, 221, 229, 0.32);--vscode-terminalOverviewRuler-findMatchForeground: rgba(209, 134, 22, 0.49);--vscode-terminal-dropBackground: rgba(53, 121, 255, 0.2);--vscode-terminal-tab.activeBorder: #1a1b1d;--vscode-terminal-initialHintForeground: rgba(255, 255, 255, 0.34);--vscode-scmGraph-historyItemRefColor: #59a4f9;--vscode-scmGraph-historyItemRemoteRefColor: #b180d7;--vscode-scmGraph-historyItemBaseRefColor: #ea5c00;--vscode-scmGraph-historyItemHoverDefaultLabelForeground: #d1d3db;--vscode-scmGraph-historyItemHoverDefaultLabelBackground: #4d4d4d;--vscode-scmGraph-historyItemHoverLabelForeground: #1a1b1d;--vscode-scmGraph-historyItemHoverAdditionsForeground: #81b88b;--vscode-scmGraph-historyItemHoverDeletionsForeground: #c74e39;--vscode-scmGraph-foreground1: #ffb000;--vscode-scmGraph-foreground2: #dc267f;--vscode-scmGraph-foreground3: #994f00;--vscode-scmGraph-foreground4: #40b0a6;--vscode-scmGraph-foreground5: #b66dff;--vscode-commentsView-resolvedIcon: #666b75;--vscode-commentsView-unresolvedIcon: rgba(0, 0, 0, 0);--vscode-editorCommentsWidget-replyInputBackground: #252526;--vscode-editorCommentsWidget-resolvedBorder: #666b75;--vscode-editorCommentsWidget-unresolvedBorder: rgba(0, 0, 0, 0);--vscode-editorCommentsWidget-rangeBackground: rgba(0, 0, 0, 0);--vscode-editorCommentsWidget-rangeActiveBackground: rgba(0, 0, 0, 0);--vscode-editorGutter-commentRangeForeground: #242527;--vscode-editorOverviewRuler-commentForeground: #242527;--vscode-editorOverviewRuler-commentUnresolvedForeground: #242527;--vscode-editorOverviewRuler-commentDraftForeground: #242527;--vscode-editorGutter-commentGlyphForeground: #d1d3db;--vscode-editorGutter-commentUnresolvedGlyphForeground: #d1d3db;--vscode-editorGutter-commentDraftGlyphForeground: #d1d3db;--vscode-ports-iconRunningProcessForeground: #369432;--vscode-welcomePage-tileBackground: #252526;--vscode-welcomePage-tileHoverBackground: #2c2c2d;--vscode-welcomePage-tileBorder: rgba(255, 255, 255, 0.1);--vscode-welcomePage-progress.background: rgba(224, 226, 242, 0.03);--vscode-welcomePage-progress.foreground: #dadde5;--vscode-walkthrough-stepTitle.foreground: #ffffff;--vscode-extensionIcon-verifiedForeground: #dadde5;--vscode-keybindingTable-headerBackground: rgba(209, 211, 219, 0.04);--vscode-keybindingTable-rowsBackground: rgba(209, 211, 219, 0.04);--vscode-extensionButton-background: #d1d3db;--vscode-extensionButton-foreground: #000000;--vscode-extensionButton-hoverBackground: #edeff2;--vscode-extensionButton-separator: rgba(13, 14, 15, 0.18);--vscode-extensionButton-prominentBackground: #d1d3db;--vscode-extensionButton-prominentForeground: #000000;--vscode-extensionButton-prominentHoverBackground: #edeff2;--vscode-debugToolBar-background: #222427;--vscode-debugIcon-startForeground: #89d185;--vscode-notebook-cellBorderColor: rgba(224, 226, 242, 0.05);--vscode-notebook-focusedEditorBorder: rgba(0, 0, 0, 0);--vscode-notebookStatusSuccessIcon-foreground: #89d185;--vscode-notebookEditorOverviewRuler-runningCellForeground: #89d185;--vscode-notebookStatusErrorIcon-foreground: #cc4b53;--vscode-notebookStatusRunningIcon-foreground: #d1d3db;--vscode-notebook-cellToolbarSeparator: rgba(128, 128, 128, 0.35);--vscode-notebook-selectedCellBackground: rgba(224, 226, 242, 0.05);--vscode-notebook-selectedCellBorder: rgba(224, 226, 242, 0.05);--vscode-notebook-focusedCellBorder: rgba(0, 0, 0, 0);--vscode-notebook-inactiveFocusedCellBorder: rgba(224, 226, 242, 0.05);--vscode-notebook-cellStatusBarItemHoverBackground: rgba(255, 255, 255, 0.15);--vscode-notebook-cellInsertionIndicator: rgba(0, 0, 0, 0);--vscode-notebookScrollbarSlider-background: rgba(121, 121, 121, 0.4);--vscode-notebookScrollbarSlider-hoverBackground: rgba(100, 100, 100, 0.7);--vscode-notebookScrollbarSlider-activeBackground: rgba(191, 191, 191, 0.4);--vscode-notebook-symbolHighlightBackground: rgba(255, 255, 255, 0.04);--vscode-notebook-cellEditorBackground: #1a1b1d;--vscode-notebook-editorBackground: #1a1b1d;--vscode-inlineChat-foreground: #d1d3db;--vscode-inlineChat-background: #252526;--vscode-inlineChat-border: #454545;--vscode-inlineChat-shadow: rgba(0, 0, 0, 0.16);--vscode-inlineChatInput-border: #454545;--vscode-inlineChatInput-focusBorder: rgba(0, 0, 0, 0);--vscode-inlineChatInput-placeholderForeground: #9599a6;--vscode-inlineChatInput-background: rgba(224, 226, 242, 0.03);--vscode-inlineChatDiff-inserted: rgba(0, 165, 110, 0.14);--vscode-editorOverviewRuler-inlineChatInserted: rgba(0, 165, 110, 0.17);--vscode-editorMinimap-inlineChatInserted: rgba(0, 165, 110, 0.17);--vscode-inlineChatDiff-removed: rgba(208, 42, 35, 0.14);--vscode-editorOverviewRuler-inlineChatRemoved: rgba(208, 42, 35, 0.17);--vscode-chat-requestBorder: rgba(255, 255, 255, 0.1);--vscode-chat-requestBackground: rgba(26, 27, 29, 0.62);--vscode-chat-slashCommandBackground: rgba(38, 71, 120, 0.4);--vscode-chat-slashCommandForeground: #85b6ff;--vscode-chat-avatarBackground: #1f1f1f;--vscode-chat-avatarForeground: #d1d3db;--vscode-chat-editedFileForeground: #e2c08d;--vscode-chat-requestCodeBorder: rgba(0, 73, 114, 0.72);--vscode-chat-requestBubbleBackground: rgba(53, 121, 255, 0.08);--vscode-chat-requestBubbleHoverBackground: rgba(53, 121, 255, 0.17);--vscode-chat-checkpointSeparator: #585858;--vscode-chat-linesAddedForeground: #54b054;--vscode-chat-linesRemovedForeground: #fc6a6a;--vscode-extensionIcon-starForeground: #ff8e00;--vscode-extensionIcon-preReleaseForeground: #1d9271;--vscode-extensionIcon-sponsorForeground: #d758b3;--vscode-extensionIcon-privateForeground: rgba(255, 255, 255, 0.38);--vscode-debugExceptionWidget-border: #a31515;--vscode-debugExceptionWidget-background: #420b0d;--vscode-editor-inlineValuesForeground: rgba(255, 255, 255, 0.5);--vscode-editor-inlineValuesBackground: rgba(255, 200, 0, 0.2);--vscode-debugIcon-breakpointForeground: #f65a5a;--vscode-debugIcon-breakpointDisabledForeground: #848484;--vscode-debugIcon-breakpointUnverifiedForeground: #848484;--vscode-debugIcon-breakpointCurrentStackframeForeground: #ffcc00;--vscode-debugIcon-breakpointStackframeForeground: #89d185;--vscode-editor-stackFrameHighlightBackground: rgba(255, 255, 0, 0.2);--vscode-editor-focusedStackFrameHighlightBackground: rgba(122, 189, 122, 0.3);--vscode-multiDiffEditor-headerBackground: #262626;--vscode-multiDiffEditor-background: #1a1b1d;--vscode-multiDiffEditor-border: rgba(224, 226, 242, 0.13);--vscode-minimap-chatEditHighlight: rgba(26, 27, 29, 0.6);--vscode-chatManagement-sashBorder: rgba(128, 128, 128, 0.35);--vscode-gauge-foreground: #007acc;--vscode-gauge-background: rgba(0, 122, 204, 0.3);--vscode-gauge-warningForeground: #dc8730;--vscode-gauge-warningBackground: rgba(220, 135, 48, 0.3);--vscode-gauge-errorForeground: #f65a5a;--vscode-gauge-errorBackground: rgba(246, 90, 90, 0.3);--vscode-interactive-activeCodeBorder: #007acc;--vscode-interactive-inactiveCodeBorder: rgba(224, 226, 242, 0.05);--vscode-testing-iconFailed: #f14c4c;--vscode-testing-iconErrored: #f14c4c;--vscode-testing-iconPassed: #73c991;--vscode-testing-runAction: #73c991;--vscode-testing-iconQueued: #cca700;--vscode-testing-iconUnset: #848484;--vscode-testing-iconSkipped: #848484;--vscode-testing-peekBorder: #f14c4c;--vscode-testing-messagePeekBorder: #59a4f9;--vscode-testing-peekHeaderBackground: rgba(241, 76, 76, 0.1);--vscode-testing-messagePeekHeaderBackground: rgba(89, 164, 249, 0.1);--vscode-testing-coveredBackground: rgba(0, 165, 110, 0.28);--vscode-testing-coveredBorder: rgba(0, 165, 110, 0.21);--vscode-testing-coveredGutterBackground: rgba(0, 165, 110, 0.17);--vscode-testing-uncoveredBranchBackground: #7f2320;--vscode-testing-uncoveredBackground: rgba(208, 42, 35, 0.28);--vscode-testing-uncoveredBorder: rgba(208, 42, 35, 0.21);--vscode-testing-uncoveredGutterBackground: rgba(208, 42, 35, 0.42);--vscode-testing-coverCountBadgeBackground: #4d4d4d;--vscode-testing-coverCountBadgeForeground: #ffffff;--vscode-testing-message.error.badgeBackground: #f14c4c;--vscode-testing-message.error.badgeBorder: #f14c4c;--vscode-testing-message.error.badgeForeground: #000000;--vscode-testing-message.info.decorationForeground: rgba(209, 211, 219, 0.5);--vscode-testing-iconErrored.retired: rgba(241, 76, 76, 0.7);--vscode-testing-iconFailed.retired: rgba(241, 76, 76, 0.7);--vscode-testing-iconPassed.retired: rgba(115, 201, 145, 0.7);--vscode-testing-iconQueued.retired: rgba(204, 167, 0, 0.7);--vscode-testing-iconUnset.retired: rgba(132, 132, 132, 0.7);--vscode-testing-iconSkipped.retired: rgba(132, 132, 132, 0.7);--vscode-statusBar-debuggingBackground: #cc6633;--vscode-statusBar-debuggingForeground: #ffffff;--vscode-commandCenter-debuggingBackground: rgba(204, 102, 51, 0.26);--vscode-debugTokenExpression-name: #c586c0;--vscode-debugTokenExpression-type: #4a90e2;--vscode-debugTokenExpression-value: rgba(204, 204, 204, 0.6);--vscode-debugTokenExpression-string: #ce9178;--vscode-debugTokenExpression-boolean: #4e94ce;--vscode-debugTokenExpression-number: #b5cea8;--vscode-debugTokenExpression-error: #f48771;--vscode-debugView-exceptionLabelForeground: #d1d3db;--vscode-debugView-exceptionLabelBackground: #6c2022;--vscode-debugView-stateLabelForeground: #d1d3db;--vscode-debugView-stateLabelBackground: rgba(136, 136, 136, 0.27);--vscode-debugView-valueChangedHighlight: #569cd6;--vscode-debugConsole-infoForeground: #59a4f9;--vscode-debugConsole-warningForeground: #cca700;--vscode-debugConsole-errorForeground: #cc4b53;--vscode-debugConsole-sourceForeground: #d1d3db;--vscode-debugConsoleInputIcon-foreground: #d1d3db;--vscode-debugIcon-pauseForeground: #75beff;--vscode-debugIcon-stopForeground: #f48771;--vscode-debugIcon-disconnectForeground: #f48771;--vscode-debugIcon-restartForeground: #89d185;--vscode-debugIcon-stepOverForeground: #75beff;--vscode-debugIcon-stepIntoForeground: #75beff;--vscode-debugIcon-stepOutForeground: #75beff;--vscode-debugIcon-continueForeground: #75beff;--vscode-debugIcon-stepBackForeground: #75beff;--vscode-mergeEditor-change.background: rgba(155, 185, 85, 0.2);--vscode-mergeEditor-change.word.background: rgba(156, 204, 44, 0.2);--vscode-mergeEditor-changeBase.background: #4b1818;--vscode-mergeEditor-changeBase.word.background: #6f1313;--vscode-mergeEditor-conflict.unhandledUnfocused.border: rgba(255, 166, 0, 0.48);--vscode-mergeEditor-conflict.unhandledFocused.border: #ffa600;--vscode-mergeEditor-conflict.handledUnfocused.border: rgba(134, 134, 134, 0.29);--vscode-mergeEditor-conflict.handledFocused.border: rgba(193, 193, 193, 0.8);--vscode-mergeEditor-conflict.handled.minimapOverViewRuler: rgba(173, 172, 168, 0.93);--vscode-mergeEditor-conflict.unhandled.minimapOverViewRuler: #fcba03;--vscode-mergeEditor-conflictingLines.background: rgba(255, 234, 0, 0.28);--vscode-mergeEditor-conflict.input1.background: rgba(64, 200, 174, 0.2);--vscode-mergeEditor-conflict.input2.background: rgba(64, 166, 255, 0.2);--vscode-terminal-ansiBlack: #000000;--vscode-terminal-ansiRed: #cd3131;--vscode-terminal-ansiGreen: #0dbc79;--vscode-terminal-ansiYellow: #e5e510;--vscode-terminal-ansiBlue: #2472c8;--vscode-terminal-ansiMagenta: #bc3fbc;--vscode-terminal-ansiCyan: #11a8cd;--vscode-terminal-ansiWhite: #e5e5e5;--vscode-terminal-ansiBrightBlack: #666666;--vscode-terminal-ansiBrightRed: #f14c4c;--vscode-terminal-ansiBrightGreen: #23d18b;--vscode-terminal-ansiBrightYellow: #f5f543;--vscode-terminal-ansiBrightBlue: #3b8eea;--vscode-terminal-ansiBrightMagenta: #d670d6;--vscode-terminal-ansiBrightCyan: #29b8db;--vscode-terminal-ansiBrightWhite: #e5e5e5;--vscode-simpleFindWidget-sashBorder: #454545;--vscode-terminalStickyScrollHover-background: #2a2d2e;--vscode-terminalCommandGuide-foreground: rgba(224, 226, 242, 0.05);--vscode-terminalSymbolIcon-flagForeground: #ee9d28;--vscode-terminalSymbolIcon-aliasForeground: #b180d7;--vscode-terminalSymbolIcon-optionValueForeground: #75beff;--vscode-terminalSymbolIcon-methodForeground: #b180d7;--vscode-terminalSymbolIcon-argumentForeground: #75beff;--vscode-terminalSymbolIcon-optionForeground: #ee9d28;--vscode-terminalSymbolIcon-fileForeground: #d1d3db;--vscode-terminalSymbolIcon-folderForeground: #d1d3db;--vscode-terminalSymbolIcon-commitForeground: #d1d3db;--vscode-terminalSymbolIcon-branchForeground: #d1d3db;--vscode-terminalSymbolIcon-tagForeground: #d1d3db;--vscode-terminalSymbolIcon-stashForeground: #d1d3db;--vscode-terminalSymbolIcon-remoteForeground: #d1d3db;--vscode-terminalSymbolIcon-pullRequestForeground: #d1d3db;--vscode-terminalSymbolIcon-pullRequestDoneForeground: #d1d3db;--vscode-terminalSymbolIcon-symbolicLinkFileForeground: #d1d3db;--vscode-terminalSymbolIcon-symbolicLinkFolderForeground: #d1d3db;--vscode-terminalSymbolIcon-symbolText: #d1d3db;--vscode-markdownAlert-note.foreground: #59a4f9;--vscode-markdownAlert-tip.foreground: #89d185;--vscode-markdownAlert-important.foreground: #b180d7;--vscode-markdownAlert-warning.foreground: #cca700;--vscode-markdownAlert-caution.foreground: #f14c4c;--vscode-walkThrough-embeddedEditorBackground: rgba(0, 0, 0, 0.4);--vscode-profiles-sashBorder: rgba(128, 128, 128, 0.35);--vscode-icube-inlineChat.regionHighlight: rgba(38, 38, 38, 0.2);--vscode-icube-inlineChatDiff.inserted: rgba(0, 165, 110, 0.14);--vscode-icube-inlineChatDiff.removed: rgba(208, 42, 35, 0.14);--vscode-icube-simpleInlineChat.regionHighlight: rgba(38, 38, 38, 0.2);--vscode-icube-simpleInlineChatDiff.inserted: rgba(0, 165, 110, 0.18);--vscode-icube-simpleInlineChatDiff.removed: rgba(208, 42, 35, 0.18);--vscode-gitDecoration-addedResourceForeground: #81b88b;--vscode-gitDecoration-modifiedResourceForeground: #e2c08d;--vscode-gitDecoration-deletedResourceForeground: #c74e39;--vscode-gitDecoration-renamedResourceForeground: #168a63;--vscode-gitDecoration-untrackedResourceForeground: #168a63;--vscode-gitDecoration-ignoredResourceForeground: #8c8c8c;--vscode-gitDecoration-stageModifiedResourceForeground: #e2c08d;--vscode-gitDecoration-stageDeletedResourceForeground: #c74e39;--vscode-gitDecoration-conflictingResourceForeground: #e4676b;--vscode-gitDecoration-submoduleResourceForeground: #8db9e2;--vscode-git-blame.editorDecorationForeground: #969696;}</style><style id="solo-lite-theme-variables">:root {
+  --workspace-gap-width: 4px;
+  --header-height: 48px;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+  --radius-2: 2px;
+  --radius-4: 4px;
+  --radius-6: 6px;
+  --radius-8: 8px;
+  --radius-12: 12px;
+  --radius-16: 16px;
+  --radius-20: 20px;
+  --radius-24: 24px;
+  --radius-32: 32px;
+  --radius-radius-2xs-4: 4px;
+  --radius-radius-xs-6: 6px;
+  --radius-radius-sm-8: 8px;
+  --radius-radius-md-12: 12px;
+  --radius-radius-lg-16: 16px;
+  --radius-radius-xl-20: 20px;
+  --radius-radius-2xl-24: 24px;
+  --radius-radius-3xl-32: 32px;
+  --radius-radius-full: 9999px;
+
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+  --spacing-xxl: 32px;
+
+  --spacer-0: 0px;
+  --spacer-2: 2px;
+  --spacer-4: 4px;
+  --spacer-6: 6px;
+  --spacer-8: 8px;
+  --spacer-12: 12px;
+  --spacer-16: 16px;
+  --spacer-20: 20px;
+  --spacer-24: 24px;
+  --spacer-32: 32px;
+  --spacer-40: 40px;
+  --spacer-48: 48px;
+  --spacer-64: 64px;
+
+  --font-size-xs: 10px;
+  --font-size-sm: 11px;
+  --font-size-md: 12px;
+  --font-size-regular: 13px;
+  --font-size-base: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-xxl: 24px;
+
+  --font-family-default:
+    'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'PingFang SC', 'Microsoft YaHei',
+    'Hiragino Sans GB', Roboto, sans-serif;
+  --font-family-heading:
+    'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'PingFang SC', 'Microsoft YaHei',
+    'Hiragino Sans GB', Roboto, sans-serif;
+  --font-family-mono: 'JetBrains Mono', 'SF Mono', Monaco, Consolas, monospace;
+  --font-weight-default: 400;
+  --font-weight-code: 450;
+  --font-weight-medium: 500;
+  --font-weight-strong: 600;
+
+  --chat-body-md: 13px/20px var(--font-family-default);
+  --chat-body-md-strong: 500 13px/20px var(--font-family-default);
+  --chat-body-base: 14px/22px var(--font-family-default);
+  --chat-body-base-strong: 500 14px/22px var(--font-family-default);
+  --chat-spacer-2xs: 2px;
+  --chat-spacer-xs: 4px;
+  --chat-spacer-sm: 8px;
+  --chat-spacer-md: 12px;
+  --chat-spacer-lg: 16px;
+  --chat-spacer-xl: 20px;
+  --chat-radius-xs: 4px;
+  --chat-radius-sm: 8px;
+  --chat-radius-md: 12px;
+  --chat-radius-lg: 16px;
+  --chat-list-item-height: 28px;
+
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.2s ease;
+  --transition-slow: 0.3s ease;
+
+  /* ===== Z-Index Layer System ===== */
+  --z-base: 0;
+  --z-above: 1;
+  --z-above-2: 2;
+
+  --z-sticky: 10;
+  --z-local-overlay: 100;
+
+  --z-dropdown: 1000;
+  --z-popover: 1010;
+
+  --z-modal-backdrop: 1090;
+  --z-modal: 1100;
+  --z-drawer: 1120;
+  --z-confirm: 1150;
+
+  --z-notification: 1200;
+  --z-tooltip: 1300;
+
+  --z-fullscreen: 1400;
+
+  /* 仅限基础设施 / 调试工具，业务组件禁止直接使用 */
+  --z-max: 9999;
+}
+
+[data-theme='light'], .vs.solo-lite {
+  --shadow-elevation-50: 0 1px 2px -1px rgba(24, 24, 24, 0.08);
+  --shadow-elevation-100: 0 3px 9px 0 rgba(24, 24, 24, 0.06);
+  --shadow-elevation-100-float: 0 -3px 9px 0 rgba(24, 24, 24, 0.06);
+  --shadow-elevation-200: 0 6px 24px -1px rgba(24, 24, 24, 0.06);
+  --shadow-elevation-200-reverse: 0 -6px 24px -1px rgba(24, 24, 24, 0.06);
+  --shadow-elevation-300: 0 2px 8px -1px rgba(24, 24, 24, 0.02), 0 10px 24px -1px rgba(24, 24, 24, 0.06);
+
+  --shadow-elevation-100-tooltip: var(--shadow-elevation-100);
+  --shadow-elevation-200-menu-panel: var(--shadow-elevation-200);
+  --shadow-elevation-300-modal-panel: var(--shadow-elevation-300);
+
+  /* 输入框阴影颜色 */
+  --shadow-chat-input: 0 3px 8px 0 rgba(24, 24, 24, 0.04), 0 6px 24px -1px rgba(24, 24, 24, 0.06);
+  --shadow-chat-input-focused: 0 4px 12px 0 rgba(24, 24, 24, 0.04), 0 6px 32px -1px rgba(24, 24, 24, 0.06);
+
+  --bg-bg-base-default: #ffffff;
+  --bg-bg-base-secondary: #f5f5f5;
+  --bg-bg-base-tertiary: #e5e5e5;
+  --bg-bg-menu: #ffffff;
+  --bg-bg-tooltip: #fafafa;
+  --bg-bg-input: #ffffff;
+  --bg-bg-overlay-l1: rgba(115, 115, 115, 0.08);
+  --bg-bg-overlay-l2: rgba(115, 115, 115, 0.12);
+  --bg-bg-overlay-l3: rgba(115, 115, 115, 0.16);
+  --bg-bg-overlay-l4: rgba(115, 115, 115, 0.20);
+  --bg-bg-white: #ffffff;
+  --bg-bg-brand: #4b3fe3;
+  --bg-bg-brand-hover: #6a6fff;
+  --bg-bg-brand-active: #3f31c6;
+  --bg-bg-brand-disabled: rgba(75, 63, 227, 0.22);
+  --bg-bg-brand-popup: rgba(170, 183, 255, 0.36);
+  /* brand-sub 兼容（品牌色已统一，sub 映射为主品牌色） */
+  --bg-bg-brand-sub: var(--bg-bg-brand);
+  --bg-bg-brand-hover-sub: var(--bg-bg-brand-hover);
+  --bg-bg-brand-disabled-sub: var(--bg-bg-brand-disabled);
+  --bg-bg-brand-popup-sub: var(--bg-bg-brand-popup);
+  --bg-bg-invert: #262626;
+  --bg-bg-invert-hover: #404040;
+  --bg-bg-invert-active: #171717;
+  --bg-bg-invert-disabled: rgba(115, 115, 115, 0.20);
+  --bg-bg-marketplace-banner-overlay-start: rgba(82, 130, 193, 0);
+  --bg-bg-marketplace-banner-overlay-end: rgba(82, 130, 193, 0.8);
+  --bg-bg-marketplace-banner-control: rgba(0, 0, 0, 0.25);
+  --bg-bg-card: #fafafa;
+  --bg-bg-card-hover: #ffffff;
+  --bg-bg-marketplace-banner-plugin-tag: #e5f3ff;
+  --bg-bg-marketplace-banner-preview-mask-start: rgba(255, 255, 255, 0.9);
+  --bg-bg-marketplace-banner-preview-mask-end: rgba(255, 255, 255, 0.54);
+  --shadow-marketplace-banner-preview-card: 0px 6px 12px -1px rgba(0, 0, 0, 0.18), 0px 10px 24px -1px rgba(0, 0, 0, 0.2);
+  --shadow-marketplace-banner-preview-card-small: 0px 2.8023247718811035px 5.604649543762207px -0.4670540988445282px rgba(0, 0, 0, 0.18), 0px 4.670541763305664px 11.209299087524414px -0.4670540988445282px rgba(0, 0, 0, 0.2);
+  --shadow-marketplace-banner-preview-card-large: 0px 4.55377721786499px 9.10755443572998px -0.758962869644165px rgba(0, 0, 0, 0.18), 0px 7.589629650115967px 18.21510887145996px -0.758962869644165px rgba(0, 0, 0, 0.2);
+  --shadow-marketplace-banner-preview-input: 0px 0px 24px -1px rgba(24, 24, 24, 0.06), 0px -12px 8px -1px rgba(24, 24, 24, 0.02);
+  --chat-bg-card: var(--bg-bg-card);
+  --chat-bg-card-hover: var(--bg-bg-base-default);
+  --special-bgtabsoverlay: rgba(255, 255, 255, 0.12);
+  --special-tabsoverlay: rgba(193, 195, 205, 0.12);
+  --text-text-default: #171717;
+  --text-text-default-hover: #262626;
+  --text-text-default-active: #262626;
+  --text-text-secondary: #404040;
+  --text-text-secondary-hover: #171717;
+  --text-text-secondary-active: #171717;
+  --text-text-tertiary: #737373;
+  --text-text-disabled: #a1a1a1;
+  --text-text-brand: #4b3fe3;
+  --text-text-brand-hover: #6a6fff;
+  --text-text-brand-sub: var(--text-text-brand);
+  --text-text-brand-hover-sub: var(--text-text-brand-hover);
+  --text-text-onbrand: #171717;
+  --text-text-onaccent: #ffffff;
+  --text-text-marketplace-banner-on-light: #0a0a0a;
+  --text-text-marketplace-banner-plugin-tag: #054c8f;
+  --icon-icon-default: #262626;
+  --icon-icon-default-hover: #171717;
+  --icon-icon-default-active: #171717;
+  --icon-icon-secondary: #404040;
+  --icon-icon-secondary-hover: #262626;
+  --icon-icon-secondary-active: #262626;
+  --icon-icon-tertiary: #737373;
+  --icon-icon-disabled: #a1a1a1;
+  --icon-icon-brand: #4b3fe3;
+  --icon-icon-brand-hover: #6a6fff;
+  --icon-icon-brand-sub: var(--icon-icon-brand);
+  --icon-icon-brand-hover-sub: var(--icon-icon-brand-hover);
+  --icon-icon-onbrand: #0a0a0a;
+  --icon-icon-onaccent: #ffffff;
+  --icon-icon-white: #ffffff;
+  --border-border-neutral-l1: rgba(115, 115, 115, 0.12);
+  --border-border-neutral-l2: rgba(115, 115, 115, 0.18);
+  --border-border-neutral-l3: rgba(115, 115, 115, 0.36);
+  --border-border-brand: #4b3fe3;
+  --border-border-brand-sub: var(--border-border-brand);
+  --border-border-contrast: #000000;
+  --status-primary-default: #2f74ff;
+  --status-primary-hover: #4c88ff;
+  --status-primary-active: #1759dd;
+  --status-primary-surface-l1: rgba(47, 116, 255, 0.12);
+  --status-primary-surface-l2: rgba(47, 116, 255, 0.18);
+  --status-primary-surface-l3: rgba(47, 116, 255, 0.36);
+  --status-success-default: #15a877;
+  --status-success-hover: #2fb287;
+  --status-success-active: #1e8b56;
+  --status-success-surface-l1: rgba(64, 176, 139, 0.12);
+  --status-success-surface-l2: rgba(64, 176, 139, 0.18);
+  --status-success-surface-l3: rgba(64, 176, 139, 0.36);
+  --status-alert-default: #fea900;
+  --status-alert-hover: #ffb700;
+  --status-alert-active: #e59100;
+  --status-alert-surface-l1: rgba(254, 169, 0, 0.14);
+  --status-alert-surface-l2: rgba(254, 169, 0, 0.20);
+  --status-alert-surface-l3: rgba(254, 169, 0, 0.36);
+  --status-warning-default: #e27900;
+  --status-warning-hover: #f39a35;
+  --status-warning-active: #c46f11;
+  --status-warning-surface-l1: rgba(226, 121, 0, 0.12);
+  --status-warning-surface-l2: rgba(226, 121, 0, 0.16);
+  --status-warning-surface-l3: rgba(226, 121, 0, 0.36);
+  --status-error-default: #e8463a;
+  --status-error-hover: #ea574c;
+  --status-error-active: #c9382f;
+  --status-error-surface-l1: rgba(232, 70, 58, 0.12);
+  --status-error-surface-l2: rgba(232, 70, 58, 0.16);
+  --status-error-surface-l3: rgba(232, 70, 58, 0.36);
+  --accent-accent-teal: #00b983;
+  --accent-accent-coral: #ff6b45;
+  --accent-accent-amber: #f2a90c;
+  --accent-accent-lime: #5fc000;
+  --accent-accent-cyan: #00b6f5;
+  --accent-accent-blue: #3f85ff;
+  --accent-accent-magenta: #f53cff;
+  --accent-accent-violet: #9570ff;
+  --accent-accent-slate: #747e94;
+  --code-code-text: #17181a;
+  --code-code-doc: #8393a3;
+  --code-code-link: #2f74ff;
+  --code-code-number: #e54595;
+  --code-code-action: #5f36b2;
+  --code-code-instruction: #b15ef2;
+  --code-code-function: #ff5d4d;
+  --code-code-constant: #175ce6;
+  --code-code-parameter: #4da621;
+  --code-code-attribute: #c99100;
+  --code-code-tag: #e24864;
+  --code-code-terminal: #17181a;
+  --code-code-contrast: #17181a;
+  --code-code-editor: #17181a;
+  --special-white: #ffffff;
+  --special-black: #000000;
+  --viz-viz-series-amber: #edaa45;
+  --viz-viz-series-coral: #f87454;
+  --viz-viz-series-indigo: #b6a3ff;
+  --viz-viz-series-lime: #a6ea39;
+  --viz-viz-series-magenta: #fb9dd7;
+  --viz-viz-series-mint: #1dc981;
+  --viz-viz-series-sky: #22a5f7;
+  --viz-viz-series-slate: #859ead;
+  --viz-viz-series-teal: #59e8e8;
+  --viz-viz-series-violet: #b655fc;
+  --viz-viz-ui-bg-chart: #ffffff;
+  --viz-viz-ui-bg-tooltip: #fafafa;
+  --viz-viz-ui-chart-axis: rgba(115, 115, 115, 0.18);
+  --viz-viz-ui-chart-subtitle: #404040;
+  --viz-viz-ui-chart-tick: #404040;
+  --viz-viz-ui-chart-title: #171717;
+  --viz-viz-ui-legend-label: #404040;
+  --viz-viz-ui-legend-value: #171717;
+  --brand-blue-100: #e5f3ff;
+  --brand-blue-200: #cce6ff;
+  --brand-blue-300: #b2daff;
+  --brand-blue-400: #99ceff;
+  --brand-blue-500: #80c1ff;
+  --brand-blue-600: #64b4ff;
+  --brand-blue-700: #3792e6;
+  --brand-blue-800: #1071cb;
+  --brand-blue-900: #054c8f;
+  --brand-blue-1000: #00284d;
+  --brand-blue-grey-100: #f1eff4;
+  --brand-blue-grey-200: #e0e1e6;
+  --brand-blue-grey-300: #cfd3d8;
+  --brand-blue-grey-400: #bfc5ca;
+  --brand-blue-grey-500: #b0b5ba;
+  --brand-blue-grey-600: #a0a6ab;
+  --brand-blue-grey-700: #80898e;
+  --brand-blue-grey-800: #5e696e;
+  --brand-blue-grey-900: #404a4f;
+  --brand-blue-grey-1000: #21262b;
+  --brand-green-grey-100: #f1f4f4;
+  --brand-green-grey-200: #e0e6e6;
+  --brand-green-grey-300: #cfd8d8;
+  --brand-green-grey-400: #bfcaca;
+  --brand-green-grey-500: #b0baba;
+  --brand-green-grey-600: #a0abab;
+  --brand-green-grey-700: #808e8e;
+  --brand-green-grey-800: #5e6e6e;
+  --brand-green-grey-900: #404f4f;
+  --brand-green-grey-1000: #212b2b;
+  --brand-purple-100: #e8e5ff;
+  --brand-purple-200: #d2ccff;
+  --brand-purple-300: #bbb2ff;
+  --brand-purple-400: #a599ff;
+  --brand-purple-500: #8e80ff;
+  --brand-purple-600: #7864ff;
+  --brand-purple-700: #4c37e6;
+  --brand-purple-800: #2610cb;
+  --brand-purple-900: #15058f;
+  --brand-purple-1000: #09004d;
+  --brand-red-100: #ffe5e5;
+  --brand-red-200: #ffcccc;
+  --brand-red-300: #ffb2b2;
+  --brand-red-400: #ff9999;
+  --brand-red-500: #ff8080;
+  --brand-red-600: #ff6464;
+  --brand-red-700: #e63737;
+  --brand-red-800: #cb1010;
+  --brand-red-900: #8f0505;
+  --brand-red-1000: #4d0000;
+  --brand-yellow-100: #fff6e5;
+  --brand-yellow-200: #ffeccc;
+  --brand-yellow-300: #ffe3b2;
+  --brand-yellow-400: #ffda99;
+  --brand-yellow-500: #ffd080;
+  --brand-yellow-600: #ffc864;
+  --brand-yellow-700: #e6a637;
+  --brand-yellow-800: #cb8710;
+  --brand-yellow-900: #8f5c05;
+  --brand-yellow-1000: #4d3000;
+  --brand-blue-grey-100: #f1eff4;
+  --brand-blue-grey-200: #e0e1e6;
+  --brand-blue-grey-300: #cfd3d8;
+  --brand-blue-grey-400: #bfc5ca;
+  --brand-blue-grey-500: #b0b5ba;
+  --brand-blue-grey-600: #a0a6ab;
+  --brand-blue-grey-700: #80898e;
+  --brand-blue-grey-800: #5e696e;
+  --brand-blue-grey-900: #404a4f;
+  --brand-blue-grey-1000: #21262b;
+  --brand-green-grey-100: #f1f4f4;
+  --brand-green-grey-200: #e0e6e6;
+  --brand-green-grey-300: #cfd8d8;
+  --brand-green-grey-400: #bfcaca;
+  --brand-green-grey-500: #b0baba;
+  --brand-green-grey-600: #a0abab;
+  --brand-green-grey-700: #808e8e;
+  --brand-green-grey-800: #5e6e6e;
+  --brand-green-grey-900: #404f4f;
+  --brand-green-grey-1000: #212b2b;
+  --brand-neutral-grey-100: #f2f2f2;
+  --brand-neutral-grey-200: #e3e3e3;
+  --brand-neutral-grey-300: #d6d6d6;
+  --brand-neutral-grey-400: #c7c7c7;
+  --brand-neutral-grey-500: #bababa;
+  --brand-neutral-grey-600: #ababab;
+  --brand-neutral-grey-700: #8a8a8a;
+  --brand-neutral-grey-800: #686868;
+  --brand-neutral-grey-900: #474747;
+  --brand-neutral-grey-1000: #262626;
+  --brand-brand-50: #f2f7ff;
+  --brand-brand-100: #e5eaff;
+  --brand-brand-200: #cfd8ff;
+  --brand-brand-300: #aab7ff;
+  --brand-brand-400: #8894ff;
+  --brand-brand-500: #6a6fff;
+  --brand-brand-600: #4b3fe3;
+  --brand-brand-700: #3f31c6;
+  --brand-brand-800: #2c2290;
+  --brand-brand-900: #1a1759;
+  --brand-brand-950: #010109;
+  --brand-brand-grey-50: #fafafa;
+  --brand-brand-grey-100: #f5f5f5;
+  --brand-brand-grey-200: #e5e5e5;
+  --brand-brand-grey-300: #d4d4d4;
+  --brand-brand-grey-400: #a1a1a1;
+  --brand-brand-grey-500: #737373;
+  --brand-brand-grey-600: #525252;
+  --brand-brand-grey-700: #404040;
+  --brand-brand-grey-800: #262626;
+  --brand-brand-grey-900: #171717;
+  --brand-brand-grey-950: #0a0a0a;
+  --brand-brand-grey-50: #fafafa;
+  --brand-brand-grey-100: #f5f5f5;
+  --brand-brand-grey-200: #e5e5e5;
+  --brand-brand-grey-300: #d4d4d4;
+  --brand-brand-grey-400: #a1a1a1;
+  --brand-brand-grey-500: #737373;
+  --brand-brand-grey-600: #525252;
+  --brand-brand-grey-700: #404040;
+  --brand-brand-grey-800: #262626;
+  --brand-brand-grey-900: #171717;
+  --brand-brand-grey-950: #0a0a0a;
+
+  --body-body-xs: 10px/1.5 var(--font-family-default);
+  --body-body-sm: 11px/1.5 var(--font-family-default);
+  --body-body-sm-strong: 600 11px/1.5 var(--font-family-default);
+  --body-body-md: 12px/1.5 var(--font-family-default);
+  --body-body-md-strong: 600 12px/1.5 var(--font-family-default);
+  --body-body-base: 14px/1.5 var(--font-family-default);
+  --body-body-base-strong: 600 14px/1.5 var(--font-family-default);
+  --heading-heading-3xs: 600 10px/1.4 var(--font-family-heading);
+  --heading-heading-2xs: 600 11px/1.4 var(--font-family-heading);
+  --heading-heading-xs: 600 12px/1.4 var(--font-family-heading);
+  --heading-heading-sm: 600 13px/1.4 var(--font-family-heading);
+  --heading-heading-md: 600 14px/1.4 var(--font-family-heading);
+  --heading-heading-lg: 600 16px/1.4 var(--font-family-heading);
+  --heading-heading-xl: 600 20px/1.4 var(--font-family-heading);
+  --heading-heading-2xl: 600 24px/1.4 var(--font-family-heading);
+  --heading-heading-3xl: 600 32px/1.4 var(--font-family-heading);
+
+  --bg-bg-overlay-l0: rgba(86, 99, 119, 0.03);
+  --bg-primary-item: rgba(86, 99, 119, 0.15);
+  --bg-primary-item-hover: rgba(86, 99, 119, 0.22);
+  --border-primary-item: rgba(77, 107, 153, 0.09);
+  --border-primary-item-hover: rgba(77, 107, 153, 0.15);
+  --bg-bg-menu-old: #f8f9fa;
+  /* 首页输入框边框颜色（纯色，用于内凹圆弧等需要精确边框的场景） */
+  --homepage-input-border-color: #dfe3eb;
+
+  --welcome-logo-bg: var(--bg-bg-brand, #0fdc78);
+  --welcome-logo-color: #000000;
+
+  --user-message-bg-solid: #E3F8ED;
+  --user-message-bg-solid-transparent: rgba(227, 248, 237, 0);
+  --user-message-bg-solid-sub: #E9E6FF;
+  --user-message-bg-solid-sub-transparent: rgba(233, 230, 255, 0);
+  --sheet-text-color: #000000;
+  --slash-mention-bg: rgba(63, 133, 255, 0.15);
+  --builtin-slash-mention-bg: rgba(149, 112, 255, 0.15);
+
+  --gradient-golden: linear-gradient(180deg, #c0a115 0%, #dfbd27 100%);
+  --special-bggoldoverlay: rgba(210, 181, 19, 0.12);
+  --query-tag-bg-grey: rgba(116, 126, 148, 0.12);
+
+  --bg-bg-brand-old: #0fdc78;
+  --gradient-brand: linear-gradient(90deg, #0ac27b 0%, #0ecd70 36%, #06c179 72%, #63c5b1 100%);
+  --text-text-preformat-foreground: #a31515;
+}
+
+[data-theme='dark'], .vs-dark.solo-lite {
+  --shadow-elevation-50: 0 1px 2px -1px rgba(0, 0, 0, 0.45);
+  --shadow-elevation-100: 0 3px 9px 0 rgba(0, 0, 0, 0.25);
+  --shadow-elevation-100-float: 0 -3px 9px 0 rgba(0, 0, 0, 0.25);
+  --shadow-elevation-200: 0 6px 24px -1px rgba(0, 0, 0, 0.25);
+  --shadow-elevation-200-reverse: 0 -6px 24px -1px rgba(0, 0, 0, 0.25);
+  --shadow-elevation-300: 0 2px 8px -1px rgba(0, 0, 0, 0.18), 0 10px 24px -1px rgba(0, 0, 0, 0.30);
+  --shadow-elevation-100-tooltip: var(--shadow-elevation-100);
+  --shadow-elevation-200-menu-panel: var(--shadow-elevation-200);
+  --shadow-elevation-300-modal-panel: var(--shadow-elevation-300);
+
+  /* 输入框阴影颜色 */
+  --shadow-chat-input: 0 3px 8px 0 rgba(24, 24, 24, 0.08), 0 6px 24px -1px rgba(24, 24, 24, 0.12);
+  --shadow-chat-input-focused: 0 4px 12px 0 rgba(24, 24, 24, 0.08), 0 6px 32px -1px rgba(24, 24, 24, 0.12);
+
+  --bg-bg-base-default: #171717;
+  --bg-bg-base-secondary: #262626;
+  --bg-bg-base-tertiary: #404040;
+  --bg-bg-menu: #171717;
+  --bg-bg-tooltip: #171717;
+  --bg-bg-input: #171717;
+  --bg-bg-overlay-l1: rgba(212, 212, 212, 0.04);
+  --bg-bg-overlay-l2: rgba(212, 212, 212, 0.06);
+  --bg-bg-overlay-l3: rgba(212, 212, 212, 0.08);
+  --bg-bg-overlay-l4: rgba(212, 212, 212, 0.12);
+  --bg-bg-white: #ffffff;
+  --bg-bg-brand: #4b3fe3;
+  --bg-bg-brand-hover: #6a6fff;
+  --bg-bg-brand-active: #3f31c6;
+  --bg-bg-brand-disabled: rgba(75, 63, 227, 0.35);
+  --bg-bg-brand-popup: rgba(106, 111, 255, 0.15);
+  --bg-bg-brand-sub: var(--bg-bg-brand);
+  --bg-bg-brand-hover-sub: var(--bg-bg-brand-hover);
+  --bg-bg-brand-disabled-sub: var(--bg-bg-brand-disabled);
+  --bg-bg-brand-popup-sub: var(--bg-bg-brand-popup);
+  --bg-bg-invert: #e5e5e5;
+  --bg-bg-invert-hover: #f5f5f5;
+  --bg-bg-invert-active: #e5e5e5;
+  --bg-bg-invert-disabled: rgba(212, 212, 212, 0.06);
+  --bg-bg-marketplace-banner-overlay-start: rgba(82, 130, 193, 0);
+  --bg-bg-marketplace-banner-overlay-end: rgba(82, 130, 193, 0.8);
+  --bg-bg-marketplace-banner-control: rgba(0, 0, 0, 0.25);
+  --bg-bg-card: #202020;
+  --bg-bg-card-hover: #171717;
+  --bg-bg-marketplace-banner-plugin-tag: #e5f3ff;
+  --bg-bg-marketplace-banner-preview-mask-start: rgba(255, 255, 255, 0.9);
+  --bg-bg-marketplace-banner-preview-mask-end: rgba(255, 255, 255, 0.54);
+  --shadow-marketplace-banner-preview-card: 0px 6px 12px -1px rgba(0, 0, 0, 0.18), 0px 10px 24px -1px rgba(0, 0, 0, 0.2);
+  --shadow-marketplace-banner-preview-card-small: 0px 2.8023247718811035px 5.604649543762207px -0.4670540988445282px rgba(0, 0, 0, 0.18), 0px 4.670541763305664px 11.209299087524414px -0.4670540988445282px rgba(0, 0, 0, 0.2);
+  --shadow-marketplace-banner-preview-card-large: 0px 4.55377721786499px 9.10755443572998px -0.758962869644165px rgba(0, 0, 0, 0.18), 0px 7.589629650115967px 18.21510887145996px -0.758962869644165px rgba(0, 0, 0, 0.2);
+  --shadow-marketplace-banner-preview-input: 0px 0px 24px -1px rgba(24, 24, 24, 0.06), 0px -12px 8px -1px rgba(24, 24, 24, 0.02);
+  --chat-bg-card: #202020;
+  --chat-bg-card-hover: var(--bg-bg-base-default);
+  --special-bgtabsoverlay: rgba(0, 0, 0, 0.20);
+  --special-tabsoverlay: rgba(13, 14, 15, 0.18);
+  --text-text-default: #e5e5e5;
+  --text-text-default-hover: #fafafa;
+  --text-text-default-active: #fafafa;
+  --text-text-secondary: #a1a1a1;
+  --text-text-secondary-hover: #e5e5e5;
+  --text-text-secondary-active: #e5e5e5;
+  --text-text-tertiary: #737373;
+  --text-text-disabled: #525252;
+  --text-text-brand: #6a6fff;
+  --text-text-brand-hover: #4b3fe3;
+  --text-text-brand-sub: var(--text-text-brand);
+  --text-text-brand-hover-sub: var(--text-text-brand-hover);
+  --text-text-onbrand: #171717;
+  --text-text-onaccent: #171717;
+  --text-text-marketplace-banner-on-light: #0a0a0a;
+  --text-text-marketplace-banner-plugin-tag: #054c8f;
+  --icon-icon-default: #e5e5e5;
+  --icon-icon-default-hover: #fafafa;
+  --icon-icon-default-active: #fafafa;
+  --icon-icon-secondary: #a1a1a1;
+  --icon-icon-secondary-hover: #e5e5e5;
+  --icon-icon-secondary-active: #e5e5e5;
+  --icon-icon-tertiary: #737373;
+  --icon-icon-disabled: #525252;
+  --icon-icon-brand: #6a6fff;
+  --icon-icon-brand-hover: #4b3fe3;
+  --icon-icon-brand-sub: var(--icon-icon-brand);
+  --icon-icon-brand-hover-sub: var(--icon-icon-brand-hover);
+  --icon-icon-onbrand: #0a0a0a;
+  --icon-icon-onaccent: #0A0A0A;
+  --icon-icon-white: #ffffff;
+  --border-border-neutral-l1: rgba(229, 229, 229, 0.10);
+  --border-border-neutral-l2: rgba(229, 229, 229, 0.16);
+  --border-border-neutral-l3: rgba(229, 229, 229, 0.20);
+  --border-border-brand: #6a6fff;
+  --border-border-brand-sub: var(--border-border-brand);
+  --border-border-contrast: #ffffff;
+  --status-primary-default: #387bff;
+  --status-primary-hover: #4c88ff;
+  --status-primary-active: #1759dd;
+  --status-primary-surface-l1: rgba(53, 121, 255, 0.18);
+  --status-primary-surface-l2: rgba(53, 121, 255, 0.28);
+  --status-primary-surface-l3: rgba(53, 121, 255, 0.36);
+  --status-success-default: #33c192;
+  --status-success-hover: #5ed4ad;
+  --status-success-active: #27b082;
+  --status-success-surface-l1: rgba(0, 165, 110, 0.18);
+  --status-success-surface-l2: rgba(0, 165, 110, 0.28);
+  --status-success-surface-l3: rgba(0, 165, 110, 0.36);
+  --status-alert-default: #d29d00;
+  --status-alert-hover: #dfb949;
+  --status-alert-active: #ab8820;
+  --status-alert-surface-l1: rgba(210, 157, 0, 0.16);
+  --status-alert-surface-l2: rgba(210, 157, 0, 0.28);
+  --status-alert-surface-l3: rgba(210, 157, 0, 0.36);
+  --status-warning-default: #d27e24;
+  --status-warning-hover: #d78b28;
+  --status-warning-active: #b46510;
+  --status-warning-surface-l1: rgba(210, 126, 36, 0.16);
+  --status-warning-surface-l2: rgba(210, 126, 36, 0.28);
+  --status-warning-surface-l3: rgba(210, 126, 36, 0.36);
+  --status-error-default: #f65a5a;
+  --status-error-hover: #f86262;
+  --status-error-active: #b33636;
+  --status-error-surface-l1: rgba(246, 70, 70, 0.18);
+  --status-error-surface-l2: rgba(246, 70, 70, 0.28);
+  --status-error-surface-l3: rgba(246, 70, 70, 0.36);
+  --accent-accent-teal: #2dd288;
+  --accent-accent-coral: #ff9392;
+  --accent-accent-amber: #dcb364;
+  --accent-accent-lime: #8acb3a;
+  --accent-accent-cyan: #04cbe5;
+  --accent-accent-blue: #7bb8ff;
+  --accent-accent-magenta: #ec93ff;
+  --accent-accent-violet: #bfa5ff;
+  --accent-accent-slate: #afb9cf;
+  --code-code-text: #e0e3ee;
+  --code-code-doc: #7f838c;
+  --code-code-link: #3c7eff;
+  --code-code-number: #f48cca;
+  --code-code-action: #b38cff;
+  --code-code-instruction: #f0d8ff;
+  --code-code-function: #f29d79;
+  --code-code-constant: #80bbff;
+  --code-code-parameter: #82d99f;
+  --code-code-attribute: #ded47e;
+  --code-code-tag: #f2858c;
+  --code-code-terminal: #e0e3ee;
+  --code-code-contrast: #e0e3ee;
+  --code-code-editor: #e0e3ee;
+  --special-white: #ffffff;
+  --special-black: #000000;
+  --viz-viz-series-amber: #edaa45;
+  --viz-viz-series-coral: #f87454;
+  --viz-viz-series-indigo: #b6a3ff;
+  --viz-viz-series-lime: #a6ea39;
+  --viz-viz-series-magenta: #fb9dd7;
+  --viz-viz-series-mint: #1dc981;
+  --viz-viz-series-sky: #22a5f7;
+  --viz-viz-series-slate: #859ead;
+  --viz-viz-series-teal: #78f2f2;
+  --viz-viz-series-violet: #b655fc;
+  --viz-viz-ui-bg-chart: #171717;
+  --viz-viz-ui-bg-tooltip: #0a0a0a;
+  --viz-viz-ui-chart-axis: rgba(229, 229, 229, 0.16);
+  --viz-viz-ui-chart-subtitle: #737373;
+  --viz-viz-ui-chart-tick: #737373;
+  --viz-viz-ui-chart-title: #e5e5e5;
+  --viz-viz-ui-legend-label: #737373;
+  --viz-viz-ui-legend-value: #e5e5e5;
+  --brand-blue-100: #e5f3ff;
+  --brand-blue-200: #cce6ff;
+  --brand-blue-300: #b2daff;
+  --brand-blue-400: #99ceff;
+  --brand-blue-500: #80c1ff;
+  --brand-blue-600: #64b4ff;
+  --brand-blue-700: #3792e6;
+  --brand-blue-800: #1071cb;
+  --brand-blue-900: #054c8f;
+  --brand-blue-1000: #00284d;
+  --brand-blue-grey-100: #f1eff4;
+  --brand-blue-grey-200: #e0e1e6;
+  --brand-blue-grey-300: #cfd3d8;
+  --brand-blue-grey-400: #bfc5ca;
+  --brand-blue-grey-500: #b0b5ba;
+  --brand-blue-grey-600: #a0a6ab;
+  --brand-blue-grey-700: #80898e;
+  --brand-blue-grey-800: #5e696e;
+  --brand-blue-grey-900: #404a4f;
+  --brand-blue-grey-1000: #21262b;
+  --brand-green-grey-100: #f1f4f4;
+  --brand-green-grey-200: #e0e6e6;
+  --brand-green-grey-300: #cfd8d8;
+  --brand-green-grey-400: #bfcaca;
+  --brand-green-grey-500: #b0baba;
+  --brand-green-grey-600: #a0abab;
+  --brand-green-grey-700: #808e8e;
+  --brand-green-grey-800: #5e6e6e;
+  --brand-green-grey-900: #404f4f;
+  --brand-green-grey-1000: #212b2b;
+  --brand-purple-100: #e8e5ff;
+  --brand-purple-200: #d2ccff;
+  --brand-purple-300: #bbb2ff;
+  --brand-purple-400: #a599ff;
+  --brand-purple-500: #8e80ff;
+  --brand-purple-600: #7864ff;
+  --brand-purple-700: #4c37e6;
+  --brand-purple-800: #2610cb;
+  --brand-purple-900: #15058f;
+  --brand-purple-1000: #09004d;
+  --brand-red-100: #ffe5e5;
+  --brand-red-200: #ffcccc;
+  --brand-red-300: #ffb2b2;
+  --brand-red-400: #ff9999;
+  --brand-red-500: #ff8080;
+  --brand-red-600: #ff6464;
+  --brand-red-700: #e63737;
+  --brand-red-800: #cb1010;
+  --brand-red-900: #8f0505;
+  --brand-red-1000: #4d0000;
+  --brand-yellow-100: #fff6e5;
+  --brand-yellow-200: #ffeccc;
+  --brand-yellow-300: #ffe3b2;
+  --brand-yellow-400: #ffda99;
+  --brand-yellow-500: #ffd080;
+  --brand-yellow-600: #ffc864;
+  --brand-yellow-700: #e6a637;
+  --brand-yellow-800: #cb8710;
+  --brand-yellow-900: #8f5c05;
+  --brand-yellow-1000: #4d3000;
+  --brand-blue-grey-100: #f1eff4;
+  --brand-blue-grey-200: #e0e1e6;
+  --brand-blue-grey-300: #cfd3d8;
+  --brand-blue-grey-400: #bfc5ca;
+  --brand-blue-grey-500: #b0b5ba;
+  --brand-blue-grey-600: #a0a6ab;
+  --brand-blue-grey-700: #80898e;
+  --brand-blue-grey-800: #5e696e;
+  --brand-blue-grey-900: #404a4f;
+  --brand-blue-grey-1000: #21262b;
+  --brand-green-grey-100: #f1f4f4;
+  --brand-green-grey-200: #e0e6e6;
+  --brand-green-grey-300: #cfd8d8;
+  --brand-green-grey-400: #bfcaca;
+  --brand-green-grey-500: #b0baba;
+  --brand-green-grey-600: #a0abab;
+  --brand-green-grey-700: #808e8e;
+  --brand-green-grey-800: #5e6e6e;
+  --brand-green-grey-900: #404f4f;
+  --brand-green-grey-1000: #212b2b;
+  --brand-neutral-grey-100: #f2f2f2;
+  --brand-neutral-grey-200: #e3e3e3;
+  --brand-neutral-grey-300: #d6d6d6;
+  --brand-neutral-grey-400: #c7c7c7;
+  --brand-neutral-grey-500: #bababa;
+  --brand-neutral-grey-600: #ababab;
+  --brand-neutral-grey-700: #8a8a8a;
+  --brand-neutral-grey-800: #686868;
+  --brand-neutral-grey-900: #474747;
+  --brand-neutral-grey-1000: #262626;
+  --brand-brand-50: #f2f7ff;
+  --brand-brand-100: #e5eaff;
+  --brand-brand-200: #cfd8ff;
+  --brand-brand-300: #aab7ff;
+  --brand-brand-400: #8894ff;
+  --brand-brand-500: #6a6fff;
+  --brand-brand-600: #4b3fe3;
+  --brand-brand-700: #3f31c6;
+  --brand-brand-800: #2c2290;
+  --brand-brand-900: #1a1759;
+  --brand-brand-950: #010109;
+  --brand-brand-grey-50: #fafafa;
+  --brand-brand-grey-100: #f5f5f5;
+  --brand-brand-grey-200: #e5e5e5;
+  --brand-brand-grey-300: #d4d4d4;
+  --brand-brand-grey-400: #a1a1a1;
+  --brand-brand-grey-500: #737373;
+  --brand-brand-grey-600: #525252;
+  --brand-brand-grey-700: #404040;
+  --brand-brand-grey-800: #262626;
+  --brand-brand-grey-900: #171717;
+  --brand-brand-grey-950: #0a0a0a;
+  --brand-brand-grey-50: #fafafa;
+  --brand-brand-grey-100: #f5f5f5;
+  --brand-brand-grey-200: #e5e5e5;
+  --brand-brand-grey-300: #d4d4d4;
+  --brand-brand-grey-400: #a1a1a1;
+  --brand-brand-grey-500: #737373;
+  --brand-brand-grey-600: #525252;
+  --brand-brand-grey-700: #404040;
+  --brand-brand-grey-800: #262626;
+  --brand-brand-grey-900: #171717;
+  --brand-brand-grey-950: #0a0a0a;
+
+  --body-body-xs: 10px/1.5 var(--font-family-default);
+  --body-body-sm: 11px/1.5 var(--font-family-default);
+  --body-body-sm-strong: 600 11px/1.5 var(--font-family-default);
+  --body-body-md: 12px/1.5 var(--font-family-default);
+  --body-body-md-strong: 600 12px/1.5 var(--font-family-default);
+  --body-body-base: 14px/1.5 var(--font-family-default);
+  --body-body-base-strong: 600 14px/1.5 var(--font-family-default);
+  --heading-heading-3xs: 600 10px/1.4 var(--font-family-heading);
+  --heading-heading-2xs: 600 11px/1.4 var(--font-family-heading);
+  --heading-heading-xs: 600 12px/1.4 var(--font-family-heading);
+  --heading-heading-sm: 600 13px/1.4 var(--font-family-heading);
+  --heading-heading-md: 600 14px/1.4 var(--font-family-heading);
+  --heading-heading-lg: 600 16px/1.4 var(--font-family-heading);
+  --heading-heading-xl: 600 20px/1.4 var(--font-family-heading);
+  --heading-heading-2xl: 600 24px/1.4 var(--font-family-heading);
+  --heading-heading-3xl: 600 32px/1.4 var(--font-family-heading);
+
+  --bg-bg-overlay-l0: rgba(224, 226, 242, 0.03);
+  --bg-primary-item: rgba(224, 226, 242, 0.08);
+  --bg-primary-item-hover: rgba(224, 226, 242, 0.12);
+  --border-primary-item: rgba(224, 226, 242, 0.06);
+  --border-primary-item-hover: rgba(224, 226, 242, 0.1);
+  /* 首页输入框边框颜色（纯色，用于内凹圆弧等需要精确边框的场景） */
+  --homepage-input-border-color: #343538;
+
+  --welcome-logo-bg: #000000;
+  --welcome-logo-color: var(--bg-bg-brand, #0fdc78);
+
+  --user-message-bg-solid: #1D352A;
+  --user-message-bg-solid-transparent: rgba(29, 53, 42, 0);
+  --user-message-bg-solid-sub: #2B2A38;
+  --user-message-bg-solid-sub-transparent: rgba(43, 42, 56, 0);
+  --sheet-text-color: #ffffff;
+  --slash-mention-bg: rgba(63, 133, 255, 0.15);
+  --builtin-slash-mention-bg: rgba(149, 112, 255, 0.15);
+
+  --gradient-golden: linear-gradient(180deg, #DAB444 0%, #FFEA8E 100%);
+  --special-bggoldoverlay: rgba(139, 128, 65, 0.12);
+  --query-tag-bg-grey: rgba(116, 126, 148, 0.18);
+
+  --bg-bg-brand-old: #32f08c;
+  --gradient-brand: linear-gradient(90deg, #3ee1a3 0%, #32f08c 36%, #60f2bd 71.63%, #a0fde7 100%);
+  --text-text-preformat-foreground: #d7ba7d;
+}
+
+[data-theme='dark-blue'], .vs-dark.solo-lite {
+  --shadow-elevation-50: 0 1px 2px -1px rgba(0, 0, 0, 0.45);
+  --shadow-elevation-100: 0 3px 9px 0 rgba(0, 0, 0, 0.25);
+  --shadow-elevation-100-float: 0 -3px 9px 0 rgba(0, 0, 0, 0.25);
+  --shadow-elevation-200: 0 6px 24px -1px rgba(0, 0, 0, 0.25);
+  --shadow-elevation-200-reverse: 0 -6px 24px -1px rgba(0, 0, 0, 0.25);
+  --shadow-elevation-300: 0 2px 8px -1px rgba(0, 0, 0, 0.18), 0 10px 24px -1px rgba(0, 0, 0, 0.30);
+  --shadow-elevation-100-tooltip: var(--shadow-elevation-100);
+  --shadow-elevation-200-menu-panel: var(--shadow-elevation-200);
+  --shadow-elevation-300-modal-panel: var(--shadow-elevation-300);
+
+  /* 输入框阴影颜色 */
+  --shadow-chat-input: 0 3px 8px 0 rgba(24, 24, 24, 0.08), 0 6px 24px -1px rgba(24, 24, 24, 0.12);
+  --shadow-chat-input-focused: 0 4px 12px 0 rgba(24, 24, 24, 0.08), 0 6px 32px -1px rgba(24, 24, 24, 0.12);
+
+  --bg-bg-base-default: #171717;
+  --bg-bg-base-secondary: #262626;
+  --bg-bg-base-tertiary: #404040;
+  --bg-bg-menu: #171717;
+  --bg-bg-tooltip: #171717;
+  --bg-bg-input: #171717;
+  --bg-bg-overlay-l1: rgba(212, 212, 212, 0.04);
+  --bg-bg-overlay-l2: rgba(212, 212, 212, 0.06);
+  --bg-bg-overlay-l3: rgba(212, 212, 212, 0.08);
+  --bg-bg-overlay-l4: rgba(212, 212, 212, 0.12);
+  --bg-bg-white: #ffffff;
+  --bg-bg-brand: #4b3fe3;
+  --bg-bg-brand-hover: #6a6fff;
+  --bg-bg-brand-active: #3f31c6;
+  --bg-bg-brand-disabled: rgba(75, 63, 227, 0.35);
+  --bg-bg-brand-popup: rgba(106, 111, 255, 0.15);
+  --bg-bg-brand-sub: var(--bg-bg-brand);
+  --bg-bg-brand-hover-sub: var(--bg-bg-brand-hover);
+  --bg-bg-brand-disabled-sub: var(--bg-bg-brand-disabled);
+  --bg-bg-brand-popup-sub: var(--bg-bg-brand-popup);
+  --bg-bg-invert: #e5e5e5;
+  --bg-bg-invert-hover: #f5f5f5;
+  --bg-bg-invert-active: #e5e5e5;
+  --bg-bg-invert-disabled: rgba(212, 212, 212, 0.06);
+  --bg-bg-marketplace-banner-overlay-start: rgba(82, 130, 193, 0);
+  --bg-bg-marketplace-banner-overlay-end: rgba(82, 130, 193, 0.8);
+  --bg-bg-marketplace-banner-control: rgba(0, 0, 0, 0.25);
+  --bg-bg-card: #202020;
+  --bg-bg-card-hover: #171717;
+  --bg-bg-marketplace-banner-plugin-tag: #e5f3ff;
+  --bg-bg-marketplace-banner-preview-mask-start: rgba(255, 255, 255, 0.9);
+  --bg-bg-marketplace-banner-preview-mask-end: rgba(255, 255, 255, 0.54);
+  --shadow-marketplace-banner-preview-card: 0px 6px 12px -1px rgba(0, 0, 0, 0.18), 0px 10px 24px -1px rgba(0, 0, 0, 0.2);
+  --shadow-marketplace-banner-preview-card-small: 0px 2.8023247718811035px 5.604649543762207px -0.4670540988445282px rgba(0, 0, 0, 0.18), 0px 4.670541763305664px 11.209299087524414px -0.4670540988445282px rgba(0, 0, 0, 0.2);
+  --shadow-marketplace-banner-preview-card-large: 0px 4.55377721786499px 9.10755443572998px -0.758962869644165px rgba(0, 0, 0, 0.18), 0px 7.589629650115967px 18.21510887145996px -0.758962869644165px rgba(0, 0, 0, 0.2);
+  --shadow-marketplace-banner-preview-input: 0px 0px 24px -1px rgba(24, 24, 24, 0.06), 0px -12px 8px -1px rgba(24, 24, 24, 0.02);
+  --chat-bg-card: var(--bg-bg-card);
+  --chat-bg-card-hover: var(--bg-bg-base-default);
+  --special-bgtabsoverlay: rgba(0, 0, 0, 0.20);
+  --special-tabsoverlay: rgba(13, 14, 15, 0.18);
+  --text-text-default: #e5e5e5;
+  --text-text-default-hover: #fafafa;
+  --text-text-default-active: #fafafa;
+  --text-text-secondary: #a1a1a1;
+  --text-text-secondary-hover: #e5e5e5;
+  --text-text-secondary-active: #e5e5e5;
+  --text-text-tertiary: #737373;
+  --text-text-disabled: #525252;
+  --text-text-brand: #6a6fff;
+  --text-text-brand-hover: #4b3fe3;
+  --text-text-brand-sub: var(--text-text-brand);
+  --text-text-brand-hover-sub: var(--text-text-brand-hover);
+  --text-text-onbrand: #171717;
+  --text-text-onaccent: #171717;
+  --text-text-marketplace-banner-on-light: #0a0a0a;
+  --text-text-marketplace-banner-plugin-tag: #054c8f;
+  --icon-icon-default: #e5e5e5;
+  --icon-icon-default-hover: #fafafa;
+  --icon-icon-default-active: #fafafa;
+  --icon-icon-secondary: #a1a1a1;
+  --icon-icon-secondary-hover: #e5e5e5;
+  --icon-icon-secondary-active: #e5e5e5;
+  --icon-icon-tertiary: #737373;
+  --icon-icon-disabled: #525252;
+  --icon-icon-brand: #6a6fff;
+  --icon-icon-brand-hover: #4b3fe3;
+  --icon-icon-brand-sub: var(--icon-icon-brand);
+  --icon-icon-brand-hover-sub: var(--icon-icon-brand-hover);
+  --icon-icon-onbrand: #0a0a0a;
+  --icon-icon-onaccent: #0A0A0A;
+  --icon-icon-white: #ffffff;
+  --border-border-neutral-l1: rgba(229, 229, 229, 0.10);
+  --border-border-neutral-l2: rgba(229, 229, 229, 0.16);
+  --border-border-neutral-l3: rgba(229, 229, 229, 0.20);
+  --border-border-brand: #6a6fff;
+  --border-border-brand-sub: var(--border-border-brand);
+  --border-border-contrast: #ffffff;
+  --status-primary-default: #387bff;
+  --status-primary-hover: #4c88ff;
+  --status-primary-active: #1759dd;
+  --status-primary-surface-l1: rgba(53, 121, 255, 0.18);
+  --status-primary-surface-l2: rgba(53, 121, 255, 0.28);
+  --status-primary-surface-l3: rgba(53, 121, 255, 0.36);
+  --status-success-default: #33c192;
+  --status-success-hover: #5ed4ad;
+  --status-success-active: #27b082;
+  --status-success-surface-l1: rgba(0, 165, 110, 0.18);
+  --status-success-surface-l2: rgba(0, 165, 110, 0.28);
+  --status-success-surface-l3: rgba(0, 165, 110, 0.36);
+  --status-alert-default: #d29d00;
+  --status-alert-hover: #dfb949;
+  --status-alert-active: #ab8820;
+  --status-alert-surface-l1: rgba(210, 157, 0, 0.16);
+  --status-alert-surface-l2: rgba(210, 157, 0, 0.28);
+  --status-alert-surface-l3: rgba(210, 157, 0, 0.36);
+  --status-warning-default: #d27e24;
+  --status-warning-hover: #d78b28;
+  --status-warning-active: #b46510;
+  --status-warning-surface-l1: rgba(210, 126, 36, 0.16);
+  --status-warning-surface-l2: rgba(210, 126, 36, 0.28);
+  --status-warning-surface-l3: rgba(210, 126, 36, 0.36);
+  --status-error-default: #f65a5a;
+  --status-error-hover: #f86262;
+  --status-error-active: #b33636;
+  --status-error-surface-l1: rgba(246, 70, 70, 0.18);
+  --status-error-surface-l2: rgba(246, 70, 70, 0.28);
+  --status-error-surface-l3: rgba(246, 70, 70, 0.36);
+  --accent-accent-teal: #2dd288;
+  --accent-accent-coral: #ff9392;
+  --accent-accent-amber: #dcb364;
+  --accent-accent-lime: #8acb3a;
+  --accent-accent-cyan: #04cbe5;
+  --accent-accent-blue: #7bb8ff;
+  --accent-accent-magenta: #ec93ff;
+  --accent-accent-violet: #bfa5ff;
+  --accent-accent-slate: #afb9cf;
+  --code-code-text: #e0e3ee;
+  --code-code-doc: #7f838c;
+  --code-code-link: #3c7eff;
+  --code-code-number: #f48cca;
+  --code-code-action: #b38cff;
+  --code-code-instruction: #f0d8ff;
+  --code-code-function: #f29d79;
+  --code-code-constant: #80bbff;
+  --code-code-parameter: #82d99f;
+  --code-code-attribute: #ded47e;
+  --code-code-tag: #f2858c;
+  --code-code-terminal: #e0e3ee;
+  --code-code-contrast: #e0e3ee;
+  --code-code-editor: #e0e3ee;
+  --special-white: #ffffff;
+  --special-black: #000000;
+  --viz-viz-series-amber: #edaa45;
+  --viz-viz-series-coral: #f87454;
+  --viz-viz-series-indigo: #b6a3ff;
+  --viz-viz-series-lime: #a6ea39;
+  --viz-viz-series-magenta: #fb9dd7;
+  --viz-viz-series-mint: #1dc981;
+  --viz-viz-series-sky: #22a5f7;
+  --viz-viz-series-slate: #859ead;
+  --viz-viz-series-teal: #78f2f2;
+  --viz-viz-series-violet: #b655fc;
+  --viz-viz-ui-bg-chart: #171717;
+  --viz-viz-ui-bg-tooltip: #0a0a0a;
+  --viz-viz-ui-chart-axis: rgba(229, 229, 229, 0.16);
+  --viz-viz-ui-chart-subtitle: #737373;
+  --viz-viz-ui-chart-tick: #737373;
+  --viz-viz-ui-chart-title: #e5e5e5;
+  --viz-viz-ui-legend-label: #737373;
+  --viz-viz-ui-legend-value: #e5e5e5;
+  --brand-blue-100: #e5f3ff;
+  --brand-blue-200: #cce6ff;
+  --brand-blue-300: #b2daff;
+  --brand-blue-400: #99ceff;
+  --brand-blue-500: #80c1ff;
+  --brand-blue-600: #64b4ff;
+  --brand-blue-700: #3792e6;
+  --brand-blue-800: #1071cb;
+  --brand-blue-900: #054c8f;
+  --brand-blue-1000: #00284d;
+  --brand-blue-grey-100: #f1eff4;
+  --brand-blue-grey-200: #e0e1e6;
+  --brand-blue-grey-300: #cfd3d8;
+  --brand-blue-grey-400: #bfc5ca;
+  --brand-blue-grey-500: #b0b5ba;
+  --brand-blue-grey-600: #a0a6ab;
+  --brand-blue-grey-700: #80898e;
+  --brand-blue-grey-800: #5e696e;
+  --brand-blue-grey-900: #404a4f;
+  --brand-blue-grey-1000: #21262b;
+  --brand-green-grey-100: #f1f4f4;
+  --brand-green-grey-200: #e0e6e6;
+  --brand-green-grey-300: #cfd8d8;
+  --brand-green-grey-400: #bfcaca;
+  --brand-green-grey-500: #b0baba;
+  --brand-green-grey-600: #a0abab;
+  --brand-green-grey-700: #808e8e;
+  --brand-green-grey-800: #5e6e6e;
+  --brand-green-grey-900: #404f4f;
+  --brand-green-grey-1000: #212b2b;
+  --brand-purple-100: #e8e5ff;
+  --brand-purple-200: #d2ccff;
+  --brand-purple-300: #bbb2ff;
+  --brand-purple-400: #a599ff;
+  --brand-purple-500: #8e80ff;
+  --brand-purple-600: #7864ff;
+  --brand-purple-700: #4c37e6;
+  --brand-purple-800: #2610cb;
+  --brand-purple-900: #15058f;
+  --brand-purple-1000: #09004d;
+  --brand-red-100: #ffe5e5;
+  --brand-red-200: #ffcccc;
+  --brand-red-300: #ffb2b2;
+  --brand-red-400: #ff9999;
+  --brand-red-500: #ff8080;
+  --brand-red-600: #ff6464;
+  --brand-red-700: #e63737;
+  --brand-red-800: #cb1010;
+  --brand-red-900: #8f0505;
+  --brand-red-1000: #4d0000;
+  --brand-yellow-100: #fff6e5;
+  --brand-yellow-200: #ffeccc;
+  --brand-yellow-300: #ffe3b2;
+  --brand-yellow-400: #ffda99;
+  --brand-yellow-500: #ffd080;
+  --brand-yellow-600: #ffc864;
+  --brand-yellow-700: #e6a637;
+  --brand-yellow-800: #cb8710;
+  --brand-yellow-900: #8f5c05;
+  --brand-yellow-1000: #4d3000;
+  --brand-blue-grey-100: #f1eff4;
+  --brand-blue-grey-200: #e0e1e6;
+  --brand-blue-grey-300: #cfd3d8;
+  --brand-blue-grey-400: #bfc5ca;
+  --brand-blue-grey-500: #b0b5ba;
+  --brand-blue-grey-600: #a0a6ab;
+  --brand-blue-grey-700: #80898e;
+  --brand-blue-grey-800: #5e696e;
+  --brand-blue-grey-900: #404a4f;
+  --brand-blue-grey-1000: #21262b;
+  --brand-green-grey-100: #f1f4f4;
+  --brand-green-grey-200: #e0e6e6;
+  --brand-green-grey-300: #cfd8d8;
+  --brand-green-grey-400: #bfcaca;
+  --brand-green-grey-500: #b0baba;
+  --brand-green-grey-600: #a0abab;
+  --brand-green-grey-700: #808e8e;
+  --brand-green-grey-800: #5e6e6e;
+  --brand-green-grey-900: #404f4f;
+  --brand-green-grey-1000: #212b2b;
+  --brand-neutral-grey-100: #f2f2f2;
+  --brand-neutral-grey-200: #e3e3e3;
+  --brand-neutral-grey-300: #d6d6d6;
+  --brand-neutral-grey-400: #c7c7c7;
+  --brand-neutral-grey-500: #bababa;
+  --brand-neutral-grey-600: #ababab;
+  --brand-neutral-grey-700: #8a8a8a;
+  --brand-neutral-grey-800: #686868;
+  --brand-neutral-grey-900: #474747;
+  --brand-neutral-grey-1000: #262626;
+  --brand-brand-50: #f2f7ff;
+  --brand-brand-100: #e5eaff;
+  --brand-brand-200: #cfd8ff;
+  --brand-brand-300: #aab7ff;
+  --brand-brand-400: #8894ff;
+  --brand-brand-500: #6a6fff;
+  --brand-brand-600: #4b3fe3;
+  --brand-brand-700: #3f31c6;
+  --brand-brand-800: #2c2290;
+  --brand-brand-900: #1a1759;
+  --brand-brand-950: #010109;
+  --brand-brand-grey-50: #fafafa;
+  --brand-brand-grey-100: #f5f5f5;
+  --brand-brand-grey-200: #e5e5e5;
+  --brand-brand-grey-300: #d4d4d4;
+  --brand-brand-grey-400: #a1a1a1;
+  --brand-brand-grey-500: #737373;
+  --brand-brand-grey-600: #525252;
+  --brand-brand-grey-700: #404040;
+  --brand-brand-grey-800: #262626;
+  --brand-brand-grey-900: #171717;
+  --brand-brand-grey-950: #0a0a0a;
+  --brand-brand-grey-50: #fafafa;
+  --brand-brand-grey-100: #f5f5f5;
+  --brand-brand-grey-200: #e5e5e5;
+  --brand-brand-grey-300: #d4d4d4;
+  --brand-brand-grey-400: #a1a1a1;
+  --brand-brand-grey-500: #737373;
+  --brand-brand-grey-600: #525252;
+  --brand-brand-grey-700: #404040;
+  --brand-brand-grey-800: #262626;
+  --brand-brand-grey-900: #171717;
+  --brand-brand-grey-950: #0a0a0a;
+
+  --body-body-xs: 10px/1.5 var(--font-family-default);
+  --body-body-sm: 11px/1.5 var(--font-family-default);
+  --body-body-sm-strong: 600 11px/1.5 var(--font-family-default);
+  --body-body-md: 12px/1.5 var(--font-family-default);
+  --body-body-md-strong: 600 12px/1.5 var(--font-family-default);
+  --body-body-base: 14px/1.5 var(--font-family-default);
+  --body-body-base-strong: 600 14px/1.5 var(--font-family-default);
+  --heading-heading-3xs: 600 10px/1.4 var(--font-family-heading);
+  --heading-heading-2xs: 600 11px/1.4 var(--font-family-heading);
+  --heading-heading-xs: 600 12px/1.4 var(--font-family-heading);
+  --heading-heading-sm: 600 13px/1.4 var(--font-family-heading);
+  --heading-heading-md: 600 14px/1.4 var(--font-family-heading);
+  --heading-heading-lg: 600 16px/1.4 var(--font-family-heading);
+  --heading-heading-xl: 600 20px/1.4 var(--font-family-heading);
+  --heading-heading-2xl: 600 24px/1.4 var(--font-family-heading);
+  --heading-heading-3xl: 600 32px/1.4 var(--font-family-heading);
+
+  --bg-bg-overlay-l0: rgba(176, 192, 244, 0.03);
+  --bg-primary-item: rgba(176, 192, 244, 0.09);
+  --bg-primary-item-hover: rgba(176, 192, 244, 0.13);
+  --border-primary-item: rgba(176, 192, 244, 0.06);
+  --border-primary-item-hover: rgba(176, 192, 244, 0.1);
+  /* 首页输入框边框颜色（纯色，用于内凹圆弧等需要精确边框的场景） */
+  --homepage-input-border-color: #343538;
+
+  --user-message-bg-solid: #1D352A;
+  --user-message-bg-solid-transparent: rgba(29, 53, 42, 0);
+  --user-message-bg-solid-sub: #2B2A38;
+  --user-message-bg-solid-sub-transparent: rgba(43, 42, 56, 0);
+  --sheet-text-color: #ffffff;
+  --slash-mention-bg: rgba(63, 133, 255, 0.15);
+  --builtin-slash-mention-bg: rgba(149, 112, 255, 0.15);
+
+  --gradient-golden: linear-gradient(180deg, #DAB444 0%, #FFEA8E 100%);
+  --special-bggoldoverlay: rgba(139, 128, 65, 0.12);
+  --query-tag-bg-grey: rgba(116, 126, 148, 0.18);
+
+  --bg-bg-brand-old: #32f08c;
+  --gradient-brand: linear-gradient(90deg, #3ee1a3 0%, #32f08c 36%, #60f2bd 71.63%, #a0fde7 100%);
+}
+</style><style data-trae-edit-ui="true" id="trae-previewer-tools-styles">:root,
+[data-trae-theme='dark'] {
+  --trae-bg-base-default: #171717;
+  --trae-bg-menu: #222427;
+  --trae-bg-overlay-l1: rgba(255, 255, 255, 0.04);
+  --trae-bg-overlay-l2: rgba(255, 255, 255, 0.08);
+  --trae-bg-overlay-l3: rgba(255, 255, 255, 0.12);
+  --trae-bg-overlay-l4: rgba(255, 255, 255, 0.16);
+  --trae-bg-invert: #f5f9fe;
+  --trae-bg-invert-hover: #e8ecf0;
+  --trae-bg-invert-active: #dce0e4;
+  --trae-bg-invert-disabled: rgba(224, 226, 242, 0.12);
+  --trae-border-l1: #e0e2f217;
+  --trae-border-l2: rgba(255, 255, 255, 0.12);
+  --trae-border-l3: rgba(255, 255, 255, 0.08);
+  --trae-border-neutral-l3: rgba(229, 229, 229, 0.20);
+  --trae-border-brand: #6a6fff;
+  --trae-text-default: #f5f9fe;
+  --trae-text-default-hover: #f5f9fe;
+  --trae-text-default-active: #f5f9fe;
+  --trae-text-secondary: rgba(245, 249, 254, 0.5);
+  --trae-text-tertiary: rgba(245, 249, 254, 0.4);
+  --trae-text-disabled: #666b75;
+  --trae-text-onaccent: #222427;
+  --trae-icon-default: #f5f9fe;
+  --trae-icon-secondary: rgba(245, 249, 254, 0.5);
+  --trae-icon-brand: #6a6fff;
+  --trae-icon-onaccent: #222427;
+  --trae-status-success: #22c55e;
+  --trae-status-primary: #3b82f6;
+  --trae-status-primary-default: #387bff;
+  --trae-status-primary-surface-l1: rgba(53, 121, 255, 0.18);
+  --trae-status-success-default: #33c192;
+  --trae-status-success-surface-l1: rgba(0, 165, 110, 0.18);
+  --trae-status-error-default: #f65a5a;
+  --trae-status-error-surface-l1: rgba(246, 70, 70, 0.18);
+  --trae-annotation-marker-bg: #4b3fe3;
+  --trae-annotation-marker-text: #ffffff;
+  --trae-annotation-region-border: var(--trae-status-primary-default);
+  --trae-annotation-rect-border: var(--trae-status-error-default);
+  --trae-annotation-arrow-anchor-bg: var(--trae-status-primary-default);
+  --trae-panel-shadow: 0px 6px 24px -1px rgba(0, 0, 0, 0.16);
+  --trae-floating-shadow: 0px 2px 8px 0px rgba(0, 0, 0, 0.2);
+  --trae-shadow-elevation-50: 0 1px 2px -1px rgba(0, 0, 0, 0.45);
+  --trae-tab-active-shadow: 0px 1px 2px -1px rgba(0, 0, 0, 0.16);
+}
+
+[data-trae-theme='light'] {
+  --trae-bg-base-default: #fafafa;
+  --trae-bg-menu: #ffffff;
+  --trae-bg-overlay-l1: rgba(0, 0, 0, 0.04);
+  --trae-bg-overlay-l2: rgba(0, 0, 0, 0.06);
+  --trae-bg-overlay-l3: rgba(0, 0, 0, 0.08);
+  --trae-bg-overlay-l4: rgba(0, 0, 0, 0.12);
+  --trae-bg-invert: #1f2328;
+  --trae-bg-invert-hover: #32383f;
+  --trae-bg-invert-active: #444d56;
+  --trae-bg-invert-disabled: rgba(115, 115, 115, 0.20);
+  --trae-border-l1: rgba(0, 0, 0, 0.1);
+  --trae-border-l2: rgba(0, 0, 0, 0.12);
+  --trae-border-l3: rgba(0, 0, 0, 0.08);
+  --trae-border-neutral-l3: rgba(115, 115, 115, 0.36);
+  --trae-border-brand: #4b3fe3;
+  --trae-text-default: #1f2328;
+  --trae-text-default-hover: #111214;
+  --trae-text-default-active: #111214;
+  --trae-text-secondary: rgba(31, 35, 40, 0.5);
+  --trae-text-tertiary: rgba(31, 35, 40, 0.4);
+  --trae-text-disabled: #a1a1a1;
+  --trae-text-onaccent: #ffffff;
+  --trae-icon-default: #1f2328;
+  --trae-icon-secondary: rgba(31, 35, 40, 0.5);
+  --trae-icon-brand: #4b3fe3;
+  --trae-icon-onaccent: #ffffff;
+  --trae-status-success: #22c55e;
+  --trae-status-primary: #3b82f6;
+  --trae-status-primary-default: #2f74ff;
+  --trae-status-primary-surface-l1: rgba(47, 116, 255, 0.12);
+  --trae-status-success-default: #15a877;
+  --trae-status-success-surface-l1: rgba(64, 176, 139, 0.12);
+  --trae-status-error-default: #e8463a;
+  --trae-status-error-surface-l1: rgba(232, 70, 58, 0.12);
+  --trae-annotation-marker-bg: #4b3fe3;
+  --trae-annotation-marker-text: #ffffff;
+  --trae-annotation-region-border: var(--trae-status-primary-default);
+  --trae-annotation-rect-border: var(--trae-status-error-default);
+  --trae-annotation-arrow-anchor-bg: var(--trae-status-primary-default);
+  --trae-panel-shadow: 0px 6px 24px -1px rgba(24, 24, 24, 0.06);
+  --trae-floating-shadow: 0px 2px 8px 0px rgba(24, 24, 24, 0.2);
+  --trae-shadow-elevation-50: 0 1px 2px -1px rgba(24, 24, 24, 0.08);
+  --trae-tab-active-shadow: 0px 1px 2px -1px rgba(24, 24, 24, 0.08);
+}
+
+@keyframes trae-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.trae-edit-mode-active body *:not([data-trae-edit-ui]):not([data-trae-edit-ui] *) {
+  transition: none !important;
+  animation-play-state: paused !important;
+}
+
+.trae-browser-inspect-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  /* stylelint-disable-next-line scale-unlimited/declaration-strict-value -- 独立注入 CSS，无法访问 :root 变量 */
+  z-index: 1400; /* z-layer: fullscreen (1400) */
+  pointer-events: auto;
+  background: transparent;
+}
+
+.trae-browser-inspect-highlight-box {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* stylelint-disable-next-line scale-unlimited/declaration-strict-value -- 独立注入 CSS，无法访问 :root 变量 */
+  z-index: 1401; /* above overlay */
+  display: none;
+}
+
+.trae-browser-inspect-highlight-tag {
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  height: 18px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  background-color: var(--trae-status-success-default);
+  color: var(--trae-text-onaccent);
+  font-size: 12px;
+  font-weight: 400;
+  display: none;
+  align-items: center;
+  /* stylelint-disable-next-line scale-unlimited/declaration-strict-value -- 独立注入 CSS，无法访问 :root 变量 */
+  z-index: 1402; /* above highlight-box */
+}
+
+.trae-browser-inspect-highlight-box-show {
+  display: flex;
+}
+
+.trae-browser-inspect-highlight-tag.trae-browser-inspect-highlight-box-show {
+  display: none;
+}
+
+.trae-browser-inspect-select-button.trae-browser-inspect-highlight-box-show {
+  display: block !important;
+}
+
+.trae-browser-inspect-select-button {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: none;
+  /* stylelint-disable-next-line scale-unlimited/declaration-strict-value -- 独立注入 CSS，无法访问 :root 变量 */
+  z-index: 1402; /* above overlay, must receive pointer events */
+}
+
+.trae-browser-inspect-select-highlight-box {
+  background: transparent !important;
+}
+
+.trae-browser-inspect-select-highlight-box .trae-browser-inspect-highlight-tag {
+  background-color: var(--trae-status-success-default);
+}
+
+.trae-add-to-chat-card {
+  display: block;
+  overflow: hidden;
+  background: var(--trae-bg-menu);
+  border: 1px solid var(--trae-border-l1);
+  border-radius: 8px;
+  box-shadow: var(--trae-floating-shadow);
+  transition:
+    width 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+    height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.trae-add-to-chat-content {
+  position: relative;
+  width: max-content;
+}
+
+.trae-fade-exit {
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+}
+
+.trae-fade-enter {
+  opacity: 1;
+  transition: opacity 0.2s ease-in;
+}
+
+.trae-buttons-view {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 4px;
+  background: transparent;
+}
+
+.trae-action-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transform: none !important;
+  transition: none !important;
+  animation: none !important;
+}
+
+.trae-action-button:hover {
+  background: var(--trae-bg-overlay-l2);
+}
+
+.trae-action-button:active {
+  background: var(--trae-bg-overlay-l3);
+}
+
+.trae-action-button:focus-visible {
+  outline: 2px solid var(--trae-status-primary);
+  outline-offset: 1px;
+}
+
+.trae-action-button-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--trae-icon-default);
+  flex-shrink: 0;
+}
+
+.trae-action-button-title {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--trae-text-default);
+  white-space: nowrap;
+}
+
+.trae-edit-toolbar-button-active {
+  background: var(--trae-status-primary-surface-l1) !important;
+  color: var(--trae-status-primary-default) !important;
+}
+
+.trae-edit-toolbar button[data-action='alignment-dropdown']:hover,
+.trae-edit-toolbar button[data-action='text-align-dropdown']:hover,
+.trae-edit-toolbar button[data-action='font-decrease']:hover,
+.trae-edit-toolbar button[data-action='font-increase']:hover,
+.trae-edit-toolbar button[data-action^='align-']:hover {
+  border-radius: 8px;
+  background: var(--bg-bg-overlay-l1, rgba(115, 115, 115, 0.08)) !important;
+}
+
+.trae-edit-toolbar button[data-action='alignment-dropdown']:active,
+.trae-edit-toolbar button[data-action='text-align-dropdown']:active,
+.trae-edit-toolbar button[data-action='font-decrease']:active,
+.trae-edit-toolbar button[data-action='font-increase']:active,
+.trae-edit-toolbar button[data-action^='align-']:active {
+  border-radius: 8px;
+  background: var(--bg-bg-overlay-l2, rgba(115, 115, 115, 0.12)) !important;
+}
+
+.trae-comment-input {
+  background: transparent;
+  color: var(--trae-text-default);
+  caret-color: var(--trae-text-default);
+}
+
+.trae-comment-input::placeholder {
+  color: var(--trae-text-tertiary);
+}
+
+.trae-edit-panel [data-trae-tooltip] {
+  position: relative;
+}
+
+.trae-edit-panel [data-trae-tooltip]::after {
+  content: attr(data-trae-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: var(--z-max, 9999);
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--bg-bg-invert, var(--trae-bg-invert));
+  color: var(--text-text-onaccent, var(--trae-text-onaccent));
+  box-shadow: var(--trae-floating-shadow);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  letter-spacing: 0.039px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-sizing: border-box;
+  opacity: 0;
+  transform: translateX(-50%);
+  visibility: hidden;
+}
+
+.trae-edit-panel [data-trae-tooltip]::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 5px);
+  z-index: var(--z-max, 9999);
+  width: 8px;
+  height: 4px;
+  background: var(--bg-bg-invert, var(--trae-bg-invert));
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  transform: translateX(-50%);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.trae-edit-panel [data-trae-tooltip]:hover::after,
+.trae-edit-panel [data-trae-tooltip]:focus-visible::after,
+.trae-edit-panel [data-trae-tooltip]:hover::before,
+.trae-edit-panel [data-trae-tooltip]:focus-visible::before {
+  opacity: 1;
+  visibility: visible;
+}
+
+.trae-comment-btn {
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.trae-comment-btn:disabled {
+  cursor: not-allowed;
+}
+
+.trae-comment-btn:focus-visible {
+  outline: 2px solid var(--trae-status-primary);
+  outline-offset: 1px;
+}
+
+.trae-comment-btn-primary {
+  background: var(--trae-bg-invert);
+  color: var(--trae-text-onaccent);
+}
+
+.trae-comment-btn-primary:hover:not(:disabled) {
+  background: var(--trae-bg-invert-hover);
+}
+
+.trae-comment-btn-primary:active:not(:disabled) {
+  background: var(--trae-bg-invert-active);
+}
+
+.trae-comment-btn-primary:disabled {
+  background: var(--trae-bg-invert-disabled);
+  color: var(--trae-text-disabled);
+}
+
+.trae-comment-btn-secondary {
+  background: var(--trae-bg-overlay-l2);
+  color: var(--trae-text-default);
+}
+
+.trae-comment-btn-secondary:hover:not(:disabled) {
+  background: var(--trae-bg-overlay-l3);
+}
+
+.trae-comment-btn-secondary:active:not(:disabled) {
+  background: var(--trae-bg-overlay-l4);
+}
+
+.trae-comment-btn-secondary:disabled {
+  background: var(--trae-bg-overlay-l2);
+  color: var(--trae-text-disabled);
+}
+
+.trae-comment-btn-text {
+  background: transparent;
+  color: var(--trae-text-default);
+}
+
+.trae-comment-btn-text:hover:not(:disabled) {
+  border-radius: 8px;
+  background: var(--bg-bg-overlay-l1, var(--trae-bg-overlay-l1));
+  color: var(--trae-text-default-hover);
+}
+
+.trae-comment-btn-text:active:not(:disabled) {
+  border-radius: 8px;
+  background: var(--trae-bg-overlay-l2);
+  color: var(--trae-text-default-active);
+}
+
+.trae-comment-btn-text:disabled {
+  background: transparent;
+  color: var(--trae-text-disabled);
+}
+
+.trae-marking-btn {
+  justify-content: center;
+}
+
+.trae-marking-btn:hover:not(:disabled) {
+  background: var(--trae-bg-overlay-l1) !important;
+}
+
+.trae-marking-btn:active:not(:disabled) {
+  background: var(--trae-bg-overlay-l2) !important;
+}
+
+.trae-marking-btn-active {
+  background: var(--trae-status-primary-surface-l1) !important;
+  color: var(--trae-status-primary-default) !important;
+}
+
+.trae-marking-btn:disabled {
+  color: var(--trae-text-disabled) !important;
+  cursor: not-allowed !important;
+}
+
+.trae-action-button-shortcut {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--trae-icon-secondary);
+  flex-shrink: 0;
+}
+
+.trae-shortcut-container {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.trae-shortcut-key {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 12px;
+  color: var(--trae-icon-secondary);
+}
+
+.trae-add-to-chat-divider {
+  width: 2px;
+  height: 12px;
+  padding: 0 6px;
+  box-sizing: content-box;
+  background-clip: content-box;
+  background-color: var(--trae-border-l2);
+  flex-shrink: 0;
+}
+
+.trae-editor-view {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  padding: 8px;
+  background: transparent;
+}
+
+.trae-editor-text-container {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  background: var(--trae-bg-overlay-l1);
+  border: 1px solid var(--trae-border-l3);
+  border-radius: 4px;
+  gap: 8px;
+}
+
+.trae-editor-textarea {
+  flex: 1;
+  padding: 0 2px;
+  border: none;
+  background: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 20px;
+  color: var(--trae-text-default);
+  resize: none;
+  outline: none;
+  overflow-y: auto;
+  max-height: 140px;
+}
+
+.trae-editor-textarea::placeholder {
+  color: var(--trae-text-tertiary);
+}
+
+.trae-editor-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition:
+    max-height 0.2s ease-out,
+    opacity 0.2s ease-out,
+    margin-top 0.2s ease-out;
+}
+
+.trae-editor-action-bar-visible {
+  max-height: 32px;
+  opacity: 1;
+  margin-top: 8px;
+}
+
+.trae-editor-cancel-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 4px;
+  background: var(--trae-bg-overlay-l2);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.trae-editor-cancel-button:hover {
+  background: var(--trae-bg-overlay-l3);
+}
+
+.trae-editor-cancel-button:active {
+  background: var(--trae-bg-overlay-l3);
+}
+
+.trae-editor-cancel-button:focus-visible {
+  outline: 2px solid var(--trae-status-primary);
+  outline-offset: 1px;
+}
+
+.trae-editor-cancel-text {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--trae-text-default);
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
+.trae-editor-submit-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 8px;
+  background: var(--trae-bg-invert);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.trae-editor-submit-button:hover {
+  background: var(--trae-bg-invert-hover);
+}
+
+.trae-editor-submit-button:active {
+  background: var(--trae-bg-invert-active);
+}
+
+.trae-editor-submit-button:focus-visible {
+  outline: 2px solid var(--trae-status-primary);
+  outline-offset: 1px;
+}
+
+.trae-editor-submit-text {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--trae-text-onaccent);
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
+.trae-editor-submit-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  color: var(--trae-icon-onaccent);
+  flex-shrink: 0;
+}
+
+.trae-success-view {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 32px;
+  white-space: nowrap;
+}
+
+.trae-success-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--trae-status-success);
+  flex-shrink: 0;
+}
+
+.trae-success-text {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  color: var(--trae-text-default);
+  user-select: none;
+}
+</style><script src="https://unpkg.byted-static.com/jszip/3.10.1/dist/jszip.min.js"></script></head>
+<body>
+    <!-- 桌宠模式 -->
+    <div class="float-container" id="petContainer">
+        <div class="float-pet" id="floatPet">
+            <img src="" alt="pet" class="float-pet-img" id="floatPetImg">
+            <div class="zzz-effect" id="zzzEffect"></div>
+        </div>
+        <div class="float-bubble" id="floatBubble">
+            <div class="bubble-option" data-action="chat">💬 聊天</div>
+            <div class="bubble-option" data-action="companion">🌸 陪伴</div>
+        </div>
+    </div>
+
+    <!-- 对话模式 -->
+    <div class="chat-container" id="chatContainer" style="display: none;">
+        <div class="chat-illust-panel" id="floatChatIllust">
+            <img src="" alt="立绘" class="illust-img" id="floatIllustImg" onerror="this.style.display='none';var p=this.nextElementSibling;if(p)p.style.display='flex';" onload="this.style.display='';var p=this.nextElementSibling;if(p)p.style.display='none';" style="display: none;">
+            <div class="illust-placeholder" style="display: flex;">
+                <div class="illust-shape"></div>
+            </div>
+            <div class="illust-mood" id="floatIllustMood"></div>
+            <button class="illust-hide-btn" id="floatIllustHideBtn">‹</button>
+        </div>
+        <div class="chat-main">
+            <div class="chat-header">
+                <button class="illust-show-btn" id="floatIllustShowBtn">›</button>
+                <span>聊天</span>
+                <button class="chat-close-btn" id="chatCloseBtn">✕</button>
+            </div>
+            <div class="chat-log" id="floatChatLog">
+            </div>
+            <div class="loading-indicator" id="loadingIndicator" style="display:none;">
+                <span class="loading-dot"></span>
+                <span class="loading-dot"></span>
+                <span class="loading-dot"></span>
+                <span class="loading-text">思考中...</span>
+            </div>
+            <div class="chat-input-area">
+                <input type="text" id="floatChatInput" placeholder="说点什么..." autocomplete="off">
+                <button class="float-send-btn" id="floatSendBtn">发送</button>
+                <button class="save-chat-btn" id="saveChatBtn">💾</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // 贴图路径辅助函数（全局可用）
+    window._stickerPack = '默认';
+    window.imgPath = function(filename) {
+        return 'img/' + (window._stickerPack || '默认') + '/' + filename;
+    };
+</script>
+    <script src="voice.js"></script>
+    <script src="float.js"></script>
+
+<div class="dark"></div><div data-trae-edit-ui="true"></div></body></html>

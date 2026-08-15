@@ -1,0 +1,87 @@
+{
+  "name": "pet-app",
+  "version": "1.0.0",
+  "description": "桌宠小屋 - Desktop Pet App",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "postinstall": "node scripts/extract-python.js",
+    "setup-tts": "node scripts/install-tts-deps.js",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run setup-tts && electron-builder --win --x64",
+    "rebuild": "npm run clean && npm run setup-tts && electron-builder --win --x64",
+    "dist": "electron-builder --win --x64"
+  },
+  "author": "PetApp",
+  "license": "MIT",
+  "devDependencies": {
+    "adm-zip": "^0.5.18",
+    "electron": "31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.example.petapp",
+    "productName": "pet-app",
+    "electronVersion": "31.0.0",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "voice.js",
+      "index.html",
+      "float.html",
+      "float.css",
+      "float.js",
+      "companion.html",
+      "companion.css",
+      "companion.js",
+      "cookie.html",
+      "cookie.css",
+      "cookie.js",
+      "css/**/*",
+      "js/**/*",
+      "img/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "python",
+        "to": "python",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "tts_service",
+        "to": "tts_service",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "stt_service",
+        "to": "stt_service",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "img/icon.ico",
+      "signAndEditExecutable": false,
+      "artifactName": "pet-app-${version}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "桌宠"
+    }
+  }
+}

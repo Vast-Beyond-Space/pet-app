@@ -1,0 +1,3118 @@
+/*
+ * main.js 改动说明：
+ * 1. 新增全局变量 chatWindow 用于独立聊天窗口
+ * 2. 新增 createChatWindow() 函数，创建带系统边框的聊天窗口
+ * 3. 修改 float-enter-chat-mode：隐藏浮窗，创建聊天窗口
+ * 4. 修改 float-exit-chat-mode：关闭聊天窗口，显示浮窗
+ * 5. 聊天窗口加载 float.html?mode=chat，复用现有渲染逻辑
+ */
+
+const { app, BrowserWindow, Menu, Tray, ipcMain, screen, nativeImage, globalShortcut, shell } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const { spawn } = require('child_process');
+const https = require('https');
+const http = require('http');
+
+// 禁用 GPU 缓存，避免 Windows 打包后出现 cache_util_win.cc 错误
+app.commandLine.appendSwitch('disable-gpu-cache');
+
+let mainWindow;
+let floatWindow = null;
+let chatWindow = null; // 新增：独立聊天窗口
+let cookieWindow = null; // 饼干窗口
+let tray = null;
+let floatPetSize = 80; // 浮窗桌宠大小，由主窗口设置同步
+let keepRunningOnClose = false; // 关闭窗口时是否保持运行
+let floatMoveMode = 'free'; // 浮窗移动模式：'free' | 'gravity'
+let floatBounceWindows = false; // 重力模式下是否碰撞窗口
+let floatShowIllust = true; // 小窗口聊天时是否显示立绘
+let cookieSpawnEnabled = true; // 是否生成饼干
+let devModeEnabled = false; // 开发者模式
+let config_behaviorKeepProb = 60; // 行为保持概率
+// 安全恢复尺寸：窗口恢复时强制设为此大小，避免再次触发自动最小化
+const SAFE_RESTORE_WIDTH = 520;
+const SAFE_RESTORE_HEIGHT = 420;
+let lastFloatMode = 'pet'; // 'pet' | 'chat'：记录上次浮窗所处模式
+let floatSessionId = 0; // 浮窗会话编号，用于区分不同浮窗实例，防止旧浮窗异步逻辑影响新浮窗
+
+// ===== 多模态（智谱 AI）全局状态 =====
+let zhipuApiKey = '';
+let multimodalEnabled = false;
+let costSavingEnabled = false;
+let aiPrompt = '';
+let voiceEnabled = true;
+let selectedVoice = 'default';
+let voiceVolume = 1.0;
+let companionFontSize = 14;
+let companionPetSize = 180;
+let stickerPack = '默认';
+
+function broadcastConfigUpdate() {
+    const config = { zhipuApiKey, multimodalEnabled, costSavingEnabled, aiPrompt, voiceEnabled, selectedVoice, voiceVolume, companionFontSize, companionPetSize, stickerPack };
+    BrowserWindow.getAllWindows().forEach(win => {
+        if (!win.isDestroyed()) win.webContents.send('config-updated', config);
+    });
+}
+
+// 获取当前窗口运行状态的完整快照
+function getPetRuntimeState() {
+    const minimized =
+        !!mainWindow &&
+        !mainWindow.isDestroyed() &&
+        mainWindow.isMinimized();
+
+    return {
+        isWindowMinimized: minimized,
+        keepRunningOnClose: !!keepRunningOnClose,
+        shouldPauseStats: minimized && !keepRunningOnClose,
+        floatSessionId
+    };
+}
+
+// 向浮窗同步完整运行状态
+function syncRuntimeStateToFloat() {
+    if (!floatWindow || floatWindow.isDestroyed()) {
+        return;
+    }
+    floatWindow.webContents.send('pet-runtime-state', getPetRuntimeState());
+}
+
+function createWindow() {
+    // 主窗口默认比例与屏幕一致（宽高比同工作区）
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+    // 保持与屏幕一致的宽高比
+    const aspect = screenWidth / screenHeight;
+    let windowWidth, windowHeight;
+    if (aspect >= 1) {
+        // 横屏或接近正方形：取屏幕宽度 55% 为主，比例同步
+        windowWidth = Math.floor(screenWidth * 0.55);
+        windowHeight = Math.floor(windowWidth / aspect);
+    } else {
+        // 竖屏：取屏幕高度 70% 为主，比例同步
+        windowHeight = Math.floor(screenHeight * 0.7);
+        windowWidth = Math.floor(windowHeight * aspect);
+    }
+
+    mainWindow = new BrowserWindow({
+        width: windowWidth,
+        height: windowHeight,
+        resizable: true,
+        title: '桌宠',
+        icon: path.join(__dirname, 'img', 'icon.png'),
+        transparent: true,
+        backgroundColor: '#00000000',
+        frame: false,
+        alwaysOnTop: true, // 非全屏时保持最上层
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload.js')
+        }
+    });
+
+    mainWindow.loadFile(path.join(__dirname, 'index.html'));
+
+    mainWindow.webContents.on('did-finish-load', () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('config-updated', { zhipuApiKey, multimodalEnabled, costSavingEnabled, aiPrompt, voiceEnabled, selectedVoice, voiceVolume });
+        }
+    });
+
+    // 双击Ctrl检测由 app.on('web-contents-created') 统一注册
+
+    // Keep the window title fixed as "桌宠" — prevent the page's <title> from overriding it
+    mainWindow.on('page-title-updated', (event) => {
+        event.preventDefault();
+    });
+
+    // Remove the default menu bar for a cleaner app-like experience
+    Menu.setApplicationMenu(null);
+
+    mainWindow.on('closed', () => {
+        mainWindow = null;
+    });
+
+    // 关闭窗口时，关闭浮窗并退出（保持运行仅通过最小化实现）
+    mainWindow.on('close', (event) => {
+        if (keepRunningOnClose && !app.isQuiting) {
+            event.preventDefault();
+            mainWindow.hide();
+            // 隐藏时关闭饼干窗口
+            if (cookieWindow && !cookieWindow.isDestroyed()) {
+                cookieWindow.destroy();
+                cookieWindow = null;
+            }
+            if (!tray) {
+                createTray();
+            }
+        } else {
+            // 正常关闭：销毁浮窗、聊天窗口和饼干窗口
+            if (floatWindow && !floatWindow.isDestroyed()) {
+                floatWindow.destroy();
+                floatWindow = null;
+            }
+            if (chatWindow && !chatWindow.isDestroyed()) {
+                chatWindow.destroy();
+                chatWindow = null;
+            }
+            if (cookieWindow && !cookieWindow.isDestroyed()) {
+                cookieWindow.destroy();
+                cookieWindow = null;
+            }
+        }
+    });
+
+    // 监听最小化事件，显示浮窗并通知渲染进程
+    mainWindow.on('minimize', () => {
+        // 陪伴模式激活时不创建浮窗
+        if (companionModeActive) return;
+        
+        mainWindow.webContents.send('window-minimized', keepRunningOnClose);
+
+        if (!keepRunningOnClose) {
+            if (!floatWindow || floatWindow.isDestroyed()) {
+                createFloatWindow();
+            } else {
+                syncRuntimeStateToFloat();
+            }
+        }
+    });
+
+    // 监听隐藏事件（macOS），也显示浮窗并通知渲染进程
+    mainWindow.on('hide', () => {
+        if (mainWindow.isMinimized()) {
+            mainWindow.webContents.send('window-minimized', keepRunningOnClose);
+        }
+        if (!floatWindow && mainWindow.isMinimized() && !keepRunningOnClose && !companionModeActive) {
+            createFloatWindow();
+        } else if (floatWindow && !floatWindow.isDestroyed() && mainWindow.isMinimized()) {
+            syncRuntimeStateToFloat();
+        }
+    });
+
+    // 监听恢复事件，关闭浮窗并通知渲染进程；恢复时调整到安全大小避免再次自动最小化
+    mainWindow.on('restore', () => {
+        handleMainWindowRestore();
+    });
+
+    // 监听窗口显示事件，关闭浮窗并通知渲染进程
+    mainWindow.on('show', () => {
+        handleMainWindowRestore();
+    });
+
+    // 监听窗口尺寸变化，通知渲染进程判断是否进入聚焦模式/自动最小化
+    let resizeDebounceTimer = null;
+    mainWindow.on('resize', () => {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        if (resizeDebounceTimer) clearTimeout(resizeDebounceTimer);
+        resizeDebounceTimer = setTimeout(() => {
+            if (!mainWindow || mainWindow.isDestroyed()) return;
+            const [w, h] = mainWindow.getContentSize();
+            const isFullScreen = mainWindow.isFullScreen();
+            const isMinimized = mainWindow.isMinimized();
+            mainWindow.webContents.send('main-window-resize', { width: w, height: h, isFullScreen, isMinimized });
+        }, 50);
+    });
+
+    // 全屏状态变化时切换 alwaysOnTop（非全屏保持最上层）
+    mainWindow.on('enter-full-screen', () => {
+        mainWindow.setAlwaysOnTop(false);
+    });
+    mainWindow.on('leave-full-screen', () => {
+        mainWindow.setAlwaysOnTop(true);
+    });
+}
+
+// 防止 handleMainWindowRestore 被重复调用的锁
+let restoringMainWindow = false;
+
+// 恢复主窗口时调整到安全大小 + 确保在屏幕可见区域内
+function restoreToSafeSize() {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isFullScreen()) return;
+    if (mainWindow.isMinimized()) return;
+
+    const [w, h] = mainWindow.getContentSize();
+    const needsResize = w < SAFE_RESTORE_WIDTH || h < SAFE_RESTORE_HEIGHT;
+
+    const display = screen.getPrimaryDisplay();
+    const workArea = display.workArea;
+    let [x, y] = mainWindow.getPosition();
+    const targetW = needsResize ? SAFE_RESTORE_WIDTH : w;
+    const targetH = needsResize ? SAFE_RESTORE_HEIGHT : h;
+
+    if (x + targetW > workArea.x + workArea.width) {
+        x = workArea.x + workArea.width - targetW;
+    }
+    if (y + targetH > workArea.y + workArea.height) {
+        y = workArea.y + workArea.height - targetH;
+    }
+    if (x < workArea.x) x = workArea.x;
+    if (y < workArea.y) y = workArea.y;
+
+    const [origX, origY] = mainWindow.getPosition();
+    if (needsResize || x !== origX || y !== origY) {
+        mainWindow.setBounds({ x, y, width: targetW, height: targetH });
+    }
+}
+
+// 主窗口恢复时的统一处理：关闭浮窗/聊天窗，通知渲染进程
+function handleMainWindowRestore() {
+    if (restoringMainWindow) return;
+    restoringMainWindow = true;
+    // 用 setTimeout 解锁兜底，防止异常中断后锁死
+    let lockCleared = false;
+    const clearLock = () => {
+        if (!lockCleared) {
+            lockCleared = true;
+            restoringMainWindow = false;
+        }
+    };
+    setTimeout(clearLock, 500);
+
+    try {
+        const wasChat = lastFloatMode === 'chat';
+
+        // 1. 如果之前是聊天模式，先通知浮窗同步最后的聊天历史
+        if (wasChat && floatWindow && !floatWindow.isDestroyed()) {
+            floatWindow.webContents.send('float-prepare-close', { floatSessionId });
+            floatWindow.webContents.send('request-sync-chat-history');
+        } else if (floatWindow && !floatWindow.isDestroyed()) {
+            floatWindow.webContents.send('float-prepare-close', { floatSessionId });
+        }
+
+        // 2. 先恢复窗口显示（必须先 restore/show，否则在最小化状态下 setBounds 会触发异常 resize 事件）
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+        }
+
+        // 3. 调整到安全大小（此时窗口已显示，setBounds 的尺寸能正确反映）
+        restoreToSafeSize();
+
+        // 4. 通知渲染进程窗口已恢复
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('window-restored');
+        }
+
+        // 5. 关闭浮窗和聊天窗口
+        if (floatWindow && !floatWindow.isDestroyed()) {
+            floatWindow.close();
+            floatWindow = null;
+        }
+        if (chatWindow && !chatWindow.isDestroyed()) {
+            chatWindow.destroy();
+            chatWindow = null;
+        }
+
+        lastFloatMode = 'pet';
+    } catch (err) {
+        console.error('handleMainWindowRestore error:', err);
+    } finally {
+        clearLock();
+    }
+}
+
+function createFloatWindow() {
+    const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+
+    floatSessionId += 1;
+    const currentFloatSessionId = floatSessionId;
+
+    // 桌宠模式：固定大小，不可调整
+    const petModeWidth = 160;
+    const petModeHeight = 140;
+
+    floatWindow = new BrowserWindow({
+        width: petModeWidth,
+        height: petModeHeight,
+        x: width - petModeWidth - 20,
+        y: height - petModeHeight - 20,
+        frame: false,
+        transparent: true,
+        resizable: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        hasShadow: false,
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload.js')
+        }
+    });
+
+    floatWindow.loadFile(path.join(__dirname, 'float.html'));
+    // 双击Ctrl检测由 app.on('web-contents-created') 统一注册
+
+    // 设置窗口为可穿透（点击穿透到下面窗口，但特定区域可点击）
+    floatWindow.setIgnoreMouseEvents(false);
+
+    // 桌宠模式锁定为固定尺寸（min=max）
+    floatWindow.setMinimumSize(petModeWidth, petModeHeight);
+    floatWindow.setMaximumSize(petModeWidth, petModeHeight);
+
+    // 浮窗加载完成后应用当前桌宠大小、移动模式及完整运行状态
+    floatWindow.webContents.on('did-finish-load', () => {
+        if (!floatWindow || floatWindow.isDestroyed()) {
+            return;
+        }
+
+        floatWindow.webContents.send('float-pet-size', floatPetSize);
+        floatWindow.webContents.send('float-move-mode', floatMoveMode);
+        floatWindow.webContents.send('float-bounce-windows', floatBounceWindows);
+        floatWindow.webContents.send('cookie-spawn-enabled', cookieSpawnEnabled);
+        floatWindow.webContents.send('set-dev-mode', devModeEnabled);
+        floatWindow.webContents.send('set-behavior-keep-prob', config_behaviorKeepProb);
+
+        floatWindow.webContents.send('pet-runtime-state', {
+            ...getPetRuntimeState(),
+            floatSessionId: currentFloatSessionId
+        });
+
+        // 推送多模态配置
+        floatWindow.webContents.send('config-updated', { zhipuApiKey, multimodalEnabled, costSavingEnabled, aiPrompt, voiceEnabled, selectedVoice, voiceVolume });
+
+        // ===== 主进程级饼干自动生成定时器（作为 float.js 定时器的补充） =====
+        setupMainCookieSpawner();
+    });
+
+    floatWindow.on('closed', () => {
+        floatSessionId += 1;
+        floatWindow = null;
+    });
+}
+
+// 新增：创建独立聊天窗口
+function createChatWindow() {
+    const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+    
+    // 聊天窗口默认比例为屏幕的 40% 宽 x 50% 高
+    const chatWidth = Math.floor(width * 0.4);
+    const chatHeight = Math.floor(height * 0.5);
+    
+    chatWindow = new BrowserWindow({
+        width: chatWidth,
+        height: chatHeight,
+        x: Math.floor((width - chatWidth) / 2),
+        y: Math.floor((height - chatHeight) / 2),
+        frame: true,            // 使用 Windows 原生标题栏
+        transparent: false,
+        resizable: true,
+        minimizable: true,
+        maximizable: true,
+        alwaysOnTop: true,
+        title: '聊天',
+        icon: path.join(__dirname, 'img', 'icon.png'),
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload.js')
+        }
+    });
+
+    // 加载同一个 float.html，但带上 mode=chat 参数
+    chatWindow.loadFile(path.join(__dirname, 'float.html'), { query: { mode: 'chat' } });
+
+    // FIX: 使用原生标题栏后，拦截窗口关闭事件，先通知渲染进程完成记忆总结
+    let pendingCloseConfirm = false;
+    chatWindow.on('close', (event) => {
+        if (!pendingCloseConfirm) {
+            event.preventDefault();
+            pendingCloseConfirm = true;
+            // 通知渲染进程：窗口即将关闭，请先完成记忆总结
+            if (chatWindow && !chatWindow.isDestroyed()) {
+                chatWindow.webContents.send('chat-window-close-requested');
+            }
+        }
+    });
+
+    // 渲染进程完成记忆总结后，确认关闭
+    ipcMain.on('chat-window-confirmed-close', () => {
+        if (chatWindow && !chatWindow.isDestroyed()) {
+            pendingCloseConfirm = false;
+            chatWindow.close();
+        }
+    });
+
+    chatWindow.on('closed', () => {
+        chatWindow = null;
+        pendingCloseConfirm = false;
+        // 聊天窗口关闭时，显示浮窗
+        if (floatWindow && !floatWindow.isDestroyed()) {
+            floatWindow.show();
+        }
+    });
+}
+
+// 饼干位置缓存（表示饼干的实际位置，非窗口位置）
+let cookiePosition = { x: 0, y: 0, active: false };
+let cookieEaten = false;
+let cookieSize = 40; // 饼干大小（约桌宠一半）
+let lastPetGroundY = 0; // 桌宠地面位置，供饼干窗口初始使用
+// 饼干窗口周围的透明边距：让饼干图片不贴窗口边缘，视觉上更小巧（参考桌宠在窗口中的比例）
+// 同时避免系统边框/resize grip 贴着饼干图片
+const COOKIE_PADDING = 18;
+
+// ===== 主进程级饼干自动生成（独立于 float.js 的定时器，确保可靠性） =====
+// 仅在浮窗存在（桌宠桌面模式激活）时生成饼干
+let mainCookieSpawnTimer = null;
+function setupMainCookieSpawner() {
+    if (mainCookieSpawnTimer) {
+        clearTimeout(mainCookieSpawnTimer);
+        mainCookieSpawnTimer = null;
+    }
+    if (!cookieSpawnEnabled) return;
+
+    const SPAWN_INTERVAL = 30000; // 30秒检查一次
+    const FIRST_DELAY = 5000; // 首次延迟5秒
+
+    function trySpawn() {
+        // 只在浮窗存在时自动生成饼干
+        if (!floatWindow || floatWindow.isDestroyed()) {
+            // 浮窗不存在，不生成，但继续定时检查
+            mainCookieSpawnTimer = setTimeout(trySpawn, SPAWN_INTERVAL);
+            return;
+        }
+        if (!cookieSpawnEnabled) {
+            if (mainCookieSpawnTimer) {
+                clearTimeout(mainCookieSpawnTimer);
+                mainCookieSpawnTimer = null;
+            }
+            return;
+        }
+        if (!cookieWindow || cookieWindow.isDestroyed()) {
+            // 没有饼干窗口 → 尝试在屏幕角落生成
+            const primaryDisplay = screen.getPrimaryDisplay();
+            const { workArea } = primaryDisplay;
+            const margin = 80;
+            const corners = [
+                { x: workArea.x + margin, y: workArea.y + margin },
+                { x: workArea.x + workArea.width - cookieSize - margin, y: workArea.y + margin },
+                { x: workArea.x + margin, y: workArea.y + workArea.height - cookieSize - margin },
+                { x: workArea.x + workArea.width - cookieSize - margin, y: workArea.y + workArea.height - cookieSize - margin }
+            ];
+            const corner = corners[Math.floor(Math.random() * corners.length)];
+            createCookieWindow(corner.x, corner.y);
+            if (cookieWindow && !cookieWindow.isDestroyed()) {
+                setTimeout(() => {
+                    cookieWindow.webContents.send('cookie-config', {
+                        moveMode: floatMoveMode,
+                        petGroundY: lastPetGroundY,
+                        cookieSize: cookieSize
+                    });
+                }, 200);
+            }
+        }
+        // 安排下一次检查
+        mainCookieSpawnTimer = setTimeout(trySpawn, SPAWN_INTERVAL);
+    }
+
+    // 首次延迟5秒
+    mainCookieSpawnTimer = setTimeout(trySpawn, FIRST_DELAY);
+}
+
+// 创建饼干窗口
+// cookieX/cookieY 表示饼干的实际位置（左上角），窗口位置会自动减去 padding
+function createCookieWindow(cookieX, cookieY, size) {
+    if (typeof size === 'number' && size >= 20 && size <= 200) {
+        cookieSize = size;
+    }
+    const COOKIE_SIZE = cookieSize;
+    // 窗口大小=饼干大小+边距*2，让饼干周围有透明区域
+    const windowSize = COOKIE_SIZE + COOKIE_PADDING * 2;
+    // 窗口位置=饼干位置-padding，让饼干图片在窗口中居中
+    const windowX = Math.round(cookieX - COOKIE_PADDING);
+    const windowY = Math.round(cookieY - COOKIE_PADDING);
+
+    // 如果已有饼干窗口，先销毁
+    if (cookieWindow && !cookieWindow.isDestroyed()) {
+        cookieWindow.destroy();
+        cookieWindow = null;
+    }
+
+    cookieWindow = new BrowserWindow({
+        width: windowSize,
+        height: windowSize,
+        x: windowX,
+        y: windowY,
+        // 饼干窗口始终无边框透明，仅开发者模式下可调整大小便于调试
+        frame: false,
+        transparent: true,
+        resizable: devModeEnabled,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        hasShadow: false,
+        autoHideMenuBar: true,
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload.js')
+        }
+    });
+
+    cookieWindow.loadFile(path.join(__dirname, 'cookie.html'));
+
+    cookieWindow.setAlwaysOnTop(true, 'screen-saver');
+
+    cookieWindow.webContents.on('did-finish-load', () => {
+        if (!cookieWindow || cookieWindow.isDestroyed()) return;
+        // 发送初始配置
+        cookieWindow.webContents.send('cookie-config', {
+            moveMode: floatMoveMode,
+            petGroundY: lastPetGroundY,
+            cookieSize: cookieSize
+        });
+    });
+
+    cookieWindow.on('closed', () => {
+        cookieWindow = null;
+        cookiePosition.active = false;
+    });
+
+    // cookiePosition 表示饼干的实际位置（左上角），不是窗口位置
+    cookiePosition = { x: cookieX, y: cookieY, active: true };
+    cookieEaten = false;
+}
+
+// 关闭饼干窗口
+function closeCookieWindow() {
+    if (cookieWindow && !cookieWindow.isDestroyed()) {
+        cookieWindow.close();
+        cookieWindow = null;
+    }
+    cookiePosition.active = false;
+    cookieEaten = false;
+    // 通知float窗口饼干已消失
+    if (floatWindow && !floatWindow.isDestroyed()) {
+        floatWindow.webContents.send('cookie-consumed');
+    }
+}
+
+// 记忆文件路径
+let memoryFilePath = '';
+
+// 从文件读取记忆
+function loadMemoryFromFile() {
+    try {
+        if (!memoryFilePath) {
+            memoryFilePath = path.join(app.getPath('userData'), 'petMemory.json');
+        }
+        if (fs.existsSync(memoryFilePath)) {
+            const data = fs.readFileSync(memoryFilePath, 'utf-8');
+            return JSON.parse(data);
+        }
+    } catch (e) {
+        console.error('Failed to read memory file:', e);
+    }
+    return [];
+}
+
+// 写入记忆到文件
+function saveMemoryToFile(items) {
+    try {
+        if (!memoryFilePath) {
+            memoryFilePath = path.join(app.getPath('userData'), 'petMemory.json');
+        }
+        fs.writeFileSync(memoryFilePath, JSON.stringify(items || []), 'utf-8');
+        return true;
+    } catch (e) {
+        console.error('Failed to write memory file:', e);
+        return false;
+    }
+}
+
+// 广播记忆更新到所有窗口
+function broadcastMemoryUpdate(items) {
+    const allWindows = BrowserWindow.getAllWindows();
+    allWindows.forEach(win => {
+        if (!win.isDestroyed() && win.webContents) {
+            win.webContents.send('memory-updated', items);
+        }
+    });
+}
+
+// IPC 处理：加载记忆
+ipcMain.handle('memory-load', async () => {
+    return loadMemoryFromFile();
+});
+
+// IPC 处理：保存记忆
+ipcMain.handle('memory-save', async (event, items) => {
+    const success = saveMemoryToFile(items);
+    if (success) {
+        broadcastMemoryUpdate(items);
+    }
+    return success;
+});
+
+// 创建系统托盘图标和菜单
+function createTray() {
+    if (tray) return;
+
+    const iconPath = path.join(__dirname, 'img', 'icon.png');
+    let trayIcon;
+    try {
+        trayIcon = nativeImage.createFromPath(iconPath);
+        if (trayIcon.isEmpty()) {
+            trayIcon = nativeImage.createEmpty();
+        }
+    } catch (e) {
+        trayIcon = nativeImage.createEmpty();
+    }
+
+    tray = new Tray(trayIcon);
+    tray.setToolTip('桌宠');
+    tray.setContextMenu(Menu.buildFromTemplate([
+        {
+            label: '显示主窗口',
+            click: () => {
+                if (mainWindow) {
+                    mainWindow.show();
+                    mainWindow.focus();
+                }
+            }
+        },
+        {
+            label: '退出',
+            click: () => {
+                app.isQuiting = true;
+                app.quit();
+            }
+        }
+    ]));
+
+    tray.on('click', () => {
+        if (mainWindow) {
+            mainWindow.show();
+            mainWindow.focus();
+        }
+    });
+}
+
+// IPC 处理：恢复主窗口
+ipcMain.on('restore-main-window', () => {
+    handleMainWindowRestore();
+});
+
+// IPC 处理：打开聊天对话框
+ipcMain.on('open-chat-dialog', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+        // 关闭浮窗
+        if (floatWindow && !floatWindow.isDestroyed()) {
+            floatWindow.close();
+            floatWindow = null;
+        }
+        // 发送消息给渲染进程打开聊天面板
+        mainWindow.webContents.send('show-chat-panel');
+    }
+});
+
+// 安全地给浮窗发送消息（窗口可能已销毁）
+function safeSendToFloat(channel, ...args) {
+    if (floatWindow && !floatWindow.isDestroyed() && floatWindow.webContents && !floatWindow.webContents.isDestroyed()) {
+        floatWindow.webContents.send(channel, ...args);
+    }
+}
+
+// IPC 处理：更新浮窗消息
+ipcMain.on('update-float-message', (event, message) => {
+    // 参数校验：必须是字符串或数字，避免 Electron 序列化异常
+    if (message !== undefined && message !== null && typeof message !== 'string' && typeof message !== 'number') {
+        message = String(message);
+    }
+    safeSendToFloat('float-message', message);
+});
+
+// IPC 处理：移动浮窗窗口
+ipcMain.on('move-float-window', (event, x, y) => {
+    if (typeof x !== 'number' || typeof y !== 'number' ||
+        isNaN(x) || isNaN(y) || !isFinite(x) || !isFinite(y) ||
+        !floatWindow || floatWindow.isDestroyed()) {
+        return;
+    }
+    floatWindow.setPosition(Math.round(x), Math.round(y));
+});
+
+// IPC 处理：设置浮窗桌宠大小
+ipcMain.on('set-float-pet-size', (event, size) => {
+    size = parseInt(size, 10);
+    if (isNaN(size) || size < 20 || size > 800) return;
+    floatPetSize = size;
+    safeSendToFloat('float-pet-size', size);
+});
+
+// IPC 处理：调整浮窗窗口尺寸
+ipcMain.on('resize-float-window', (event, w, h) => {
+    if (typeof w !== 'number' || typeof h !== 'number' || !floatWindow || floatWindow.isDestroyed()) return;
+    w = Math.max(60, Math.min(1400, Math.round(w)));
+    h = Math.max(60, Math.min(1400, Math.round(h)));
+    floatWindow.setMinimumSize(0, 0);
+    floatWindow.setMaximumSize(0, 0);
+    floatWindow.setSize(w, h);
+    floatWindow.setMinimumSize(w, h);
+    floatWindow.setMaximumSize(w, h);
+});
+
+// IPC 处理：设置浮窗是否碰撞窗口
+ipcMain.on('set-float-bounce-windows', (event, enabled) => {
+    floatBounceWindows = !!enabled;
+    safeSendToFloat('float-bounce-windows', floatBounceWindows);
+});
+
+// IPC 处理：设置小窗口聊天时是否显示立绘
+ipcMain.on('set-float-show-illust', (event, enabled) => {
+    floatShowIllust = !!enabled;
+    if (chatWindow && !chatWindow.isDestroyed()) {
+        chatWindow.webContents.send('float-show-illust', floatShowIllust);
+    }
+});
+
+// IPC 处理：设置是否生成饼干
+ipcMain.on('set-cookie-spawn-enabled', (event, enabled) => {
+    cookieSpawnEnabled = !!enabled;
+    safeSendToFloat('cookie-spawn-enabled', cookieSpawnEnabled);
+    if (!cookieSpawnEnabled) {
+        // 关闭时销毁现有饼干（closeCookieWindow 内部会通知float窗口）
+        closeCookieWindow();
+    }
+    // 同步重启主进程级饼干生成器
+    setupMainCookieSpawner();
+});
+
+// IPC 处理：设置关闭窗口时是否保持运行
+ipcMain.on('set-keep-running-on-close', (event, enabled) => {
+    keepRunningOnClose = !!enabled;
+});
+
+// IPC 处理：窗口控制
+ipcMain.on('window-minimize', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.minimize();
+    }
+});
+
+ipcMain.on('window-maximize', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        // 最大化按钮切换全屏；全屏时关闭 alwaysOnTop
+        if (mainWindow.isFullScreen()) {
+            mainWindow.setFullScreen(false);
+            mainWindow.setAlwaysOnTop(true);
+        } else {
+            mainWindow.setFullScreen(true);
+            mainWindow.setAlwaysOnTop(false);
+        }
+    }
+});
+
+ipcMain.on('window-close', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.close();
+    }
+});
+
+// IPC 处理：渲染进程请求调整主窗口尺寸（用于恢复时避免再次触发自动最小化）
+ipcMain.on('window-set-size', (event, w, h) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        const width = Math.max(100, Math.floor(Number(w) || 0));
+        const height = Math.max(100, Math.floor(Number(h) || 0));
+        if (width > 0 && height > 0) {
+            const [x, y] = mainWindow.getPosition();
+            mainWindow.setBounds({ x, y, width, height });
+        }
+    }
+});
+
+// IPC 处理：设置主窗口透明度（0~1）
+ipcMain.on('set-window-opacity', (event, opacity) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        const val = Math.max(0, Math.min(1, Number(opacity) || 1));
+        mainWindow.setOpacity(val);
+    }
+});
+
+
+// IPC 处理：浮窗进入对话模式（新建独立聊天窗口）
+ipcMain.on('float-enter-chat-mode', () => {
+    // 记录当前为聊天模式
+    lastFloatMode = 'chat';
+    // 如果聊天窗口已存在，聚焦并返回
+    if (chatWindow && !chatWindow.isDestroyed()) {
+        chatWindow.focus();
+        return;
+    }
+    // 通知浮窗把当前聊天历史同步到主进程（这样如果主窗口恢复时仍能继承对话）
+    if (floatWindow && !floatWindow.isDestroyed()) {
+        floatWindow.webContents.send('request-sync-chat-history');
+    }
+    // 创建独立聊天窗口
+    createChatWindow();
+    // 隐藏浮窗（不销毁）
+    if (floatWindow && !floatWindow.isDestroyed()) {
+        floatWindow.hide();
+    }
+});
+
+// IPC 处理：浮窗退出对话模式（关闭聊天窗口）
+ipcMain.on('float-exit-chat-mode', () => {
+    // 退出后回到桌宠模式
+    lastFloatMode = 'pet';
+    // 关闭聊天窗口
+    if (chatWindow && !chatWindow.isDestroyed()) {
+        chatWindow.close();
+        chatWindow = null;
+    }
+    // 显示浮窗
+    if (floatWindow && !floatWindow.isDestroyed()) {
+        floatWindow.show();
+    }
+});
+
+// IPC 处理：同步浮窗大小到主窗口设置
+ipcMain.on('sync-float-size-to-settings', (event, size) => {
+    floatPetSize = size;
+    // 通知主窗口更新设置 UI
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('sync-float-size', size);
+    }
+});
+
+// IPC 处理：拖出房子后最小化主窗口 + 浮窗移动到鼠标处
+ipcMain.on('minimize-and-move-float', (event, x, y) => {
+    if (typeof x !== 'number' || typeof y !== 'number' || isNaN(x) || isNaN(y)) {
+        return;
+    }
+    // 浮窗不存在则创建
+    if (!floatWindow || floatWindow.isDestroyed()) {
+        createFloatWindow();
+        // 等窗口创建完成后再移动
+        const tryMove = (retries) => {
+            if (floatWindow && !floatWindow.isDestroyed() && floatWindow.webContents) {
+                const padding = Math.ceil(floatPetSize * 0.6);
+                const w = floatPetSize + padding * 2;
+                const h = floatPetSize + padding * 2 + 40 + floatPetSize / 2;
+                const px = Math.max(0, Math.round(x - w / 2));
+                const py = Math.max(0, Math.round(y - h / 2));
+                floatWindow.setPosition(px, py);
+            } else if (retries > 0) {
+                setTimeout(() => tryMove(retries - 1), 50);
+            }
+        };
+        tryMove(20);
+    } else {
+        // 浮窗已存在，直接移动到鼠标处
+        const padding = Math.ceil(floatPetSize * 0.6);
+        const w = floatPetSize + padding * 2;
+        const h = floatPetSize + padding * 2 + 40 + floatPetSize / 2;
+        const px = Math.max(0, Math.round(x - w / 2));
+        const py = Math.max(0, Math.round(y - h / 2));
+        floatWindow.setPosition(px, py);
+    }
+    // 最小化主窗口
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
+        mainWindow.minimize();
+    }
+});
+
+// IPC 处理：获取指定坐标所在显示器的工作区（多屏适配）
+ipcMain.handle('get-work-area-at-point', (event, x, y) => {
+    // screen.getDisplayMatching 需要完整 Rectangle（含 width/height），否则报转换错误
+    // 这里只需按点定位，给 1x1 的矩形即可
+    const display = screen.getDisplayMatching({ x: Math.round(x), y: Math.round(y), width: 1, height: 1 });
+    const wa = display.workArea;
+    return { x: wa.x, y: wa.y, width: wa.width, height: wa.height };
+});
+
+// IPC 处理：获取所有可见且非最大化的窗口边界（用于碰撞检测和窗口内弹跳）
+ipcMain.handle('get-window-bounds', () => {
+    const bounds = [];
+    BrowserWindow.getAllWindows().forEach(win => {
+        if (win.isVisible() && !win.isMaximized() && !win.isMinimized()) {
+            const b = win.getBounds();
+            // 排除浮窗自身、聊天窗口和主窗口
+            if (win !== floatWindow && win !== chatWindow) {
+                bounds.push({ x: b.x, y: b.y, width: b.width, height: b.height });
+            }
+        }
+    });
+    return bounds;
+});
+
+// IPC 处理：获取记忆内容（转发到主窗口）
+ipcMain.handle('get-memory-items', async (event) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+        throw new Error('Main window unavailable, cannot read memory');
+    }
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Memory read timeout: main window not responding')), 5000);
+        mainWindow.webContents.send('get-memory-items-request');
+        const handler = (event, items) => {
+            clearTimeout(timeout);
+            ipcMain.removeListener('get-memory-items-response', handler);
+            resolve(items || []);
+        };
+        ipcMain.on('get-memory-items-response', handler);
+    });
+});
+
+// IPC 处理：保存单条记忆（主进程直接读写文件，消除 executeJavaScript 脆弱链路）
+ipcMain.handle('save-memory-item', async (event, text) => {
+    if (!text || !text.trim()) return false;
+    try {
+        // 1. 从文件读取当前记忆
+        const items = loadMemoryFromFile();
+        // 2. 添加新记忆
+        items.push({ text: text.trim() });
+        // 3. 写入文件
+        const success = saveMemoryToFile(items);
+        if (success) {
+            // 4. 广播到所有窗口（主窗口和浮窗都会通过 onMemoryUpdated 同步）
+            broadcastMemoryUpdate(items);
+        }
+        return success;
+    } catch (e) {
+        console.error('[main] save-memory-item failed:', e);
+        return false;
+    }
+});
+
+// IPC 处理：触发记忆总结（转发到主窗口）
+ipcMain.on('trigger-memory-summary', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('trigger-memory-summary');
+    }
+});
+
+// ===== 饼干窗口 IPC =====
+
+// 获取饼干窗口位置（同步）
+ipcMain.on('get-cookie-window-pos', (event) => {
+    if (cookieWindow && !cookieWindow.isDestroyed()) {
+        const [x, y] = cookieWindow.getPosition();
+        event.returnValue = [x, y];
+    } else {
+        event.returnValue = [0, 0];
+    }
+});
+
+// 设置饼干窗口位置
+// x, y 是窗口的位置（cookie.js 传过来的 windowScreenX/Y）
+ipcMain.on('set-cookie-window-pos', (event, x, y) => {
+    if (typeof x !== 'number' || typeof y !== 'number') return;
+    if (cookieWindow && !cookieWindow.isDestroyed()) {
+        cookieWindow.setPosition(Math.round(x), Math.round(y));
+        // cookiePosition 表示饼干位置（窗口位置+padding）
+        cookiePosition.x = Math.round(x) + COOKIE_PADDING;
+        cookiePosition.y = Math.round(y) + COOKIE_PADDING;
+    }
+});
+
+// 饼干位置更新（饼干窗口→主进程→转发给float窗口）
+// x, y 是窗口的位置，转发时转换为饼干实际位置（+padding）
+ipcMain.on('cookie-position-update', (event, x, y) => {
+    if (typeof x !== 'number' || typeof y !== 'number') return;
+    cookiePosition.x = x + COOKIE_PADDING;
+    cookiePosition.y = y + COOKIE_PADDING;
+    cookiePosition.active = true;
+    if (floatWindow && !floatWindow.isDestroyed()) {
+        floatWindow.webContents.send('cookie-position-update', { x: cookiePosition.x, y: cookiePosition.y, active: true, size: cookieSize });
+    }
+});
+
+// 饼干拖拽超时
+ipcMain.on('cookie-drag-timeout', () => {
+    if (floatWindow && !floatWindow.isDestroyed()) {
+        floatWindow.webContents.send('cookie-drag-timeout');
+    }
+});
+
+// 饼干被吃掉（动画完成后通知主进程）
+ipcMain.on('cookie-eaten', () => {
+    cookieEaten = true;
+    // 通知float窗口饼干已吃掉（不关闭窗口，由request-eat-cookie统一管理）
+    if (floatWindow && !floatWindow.isDestroyed()) {
+        floatWindow.webContents.send('cookie-eaten');
+    }
+});
+
+// Float窗口请求吃饼干
+ipcMain.on('request-eat-cookie', () => {
+    if (!cookieWindow || cookieWindow.isDestroyed()) return;
+    if (cookieEaten) return;
+    cookieWindow.webContents.send('eat-cookie');
+    cookieEaten = true;
+    // 吃饼干持续数秒（与float窗口STATE_DURATIONS.eating_cookie一致）
+    setTimeout(() => {
+        closeCookieWindow();
+        if (floatWindow && !floatWindow.isDestroyed()) {
+            floatWindow.webContents.send('cookie-consumed');
+        }
+    }, 3000);
+});
+
+// Float窗口请求生成饼干
+ipcMain.on('request-spawn-cookie', (event, x, y) => {
+    if (typeof x !== 'number' || typeof y !== 'number') return;
+    if (cookieWindow && !cookieWindow.isDestroyed()) return; // 已有饼干
+    createCookieWindow(x, y);
+    // 发送配置
+    setTimeout(() => {
+        if (cookieWindow && !cookieWindow.isDestroyed()) {
+            cookieWindow.webContents.send('cookie-config', {
+                moveMode: floatMoveMode,
+                petGroundY: lastPetGroundY,
+                cookieSize: cookieSize
+            });
+        }
+    }, 200);
+});
+
+// 开发者模式：双击Ctrl生成饼干（保留IPC接口，内部调用统一函数）
+ipcMain.on('dev-spawn-cookie', () => {
+    spawnCookieFromDevMode();
+});
+
+// 获取饼干位置（供float窗口查询）
+ipcMain.handle('get-cookie-position', () => {
+    return {
+        x: cookiePosition.x,
+        y: cookiePosition.y,
+        active: cookiePosition.active && !cookieEaten
+    };
+});
+
+// 获取移动模式
+ipcMain.handle('get-move-mode', () => {
+    return floatMoveMode;
+});
+
+// 更新桌宠地面位置（发送给饼干窗口）
+function sendPetGroundToCookie(groundY) {
+    if (cookieWindow && !cookieWindow.isDestroyed()) {
+        cookieWindow.webContents.send('pet-position-update', { groundY });
+    }
+}
+
+// 当移动模式改变时，通知饼干窗口
+function syncMoveModeToCookie() {
+    if (cookieWindow && !cookieWindow.isDestroyed()) {
+        cookieWindow.webContents.send('cookie-config', {
+            moveMode: floatMoveMode,
+            petGroundY: lastPetGroundY
+        });
+    }
+}
+
+// 监听移动模式改变
+ipcMain.on('set-float-move-mode', (event, mode) => {
+    if (mode !== 'free' && mode !== 'gravity') return;
+    floatMoveMode = mode;
+    safeSendToFloat('float-move-mode', mode);
+    syncMoveModeToCookie();
+});
+
+// Float窗口上报地面位置
+ipcMain.on('float-ground-position', (event, groundY) => {
+    if (typeof groundY !== 'number') return;
+    lastPetGroundY = groundY;
+    sendPetGroundToCookie(groundY);
+});
+
+// Float窗口请求关闭饼干
+ipcMain.on('close-cookie-window', () => {
+    closeCookieWindow();
+});
+
+// 设置饼干大小（从设置页面）
+ipcMain.on('set-cookie-size', (event, size) => {
+    cookieSize = size;
+    // 调整现有饼干窗口大小（窗口大小=饼干大小+padding*2）
+    if (cookieWindow && !cookieWindow.isDestroyed()) {
+        const windowSize = size + COOKIE_PADDING * 2;
+        cookieWindow.setSize(windowSize, windowSize);
+        cookieWindow.webContents.send('cookie-config', {
+            cookieSize: size
+        });
+    }
+    // 通知浮窗更新饼干大小（用于碰撞检测）
+    if (floatWindow && !floatWindow.isDestroyed()) {
+        floatWindow.webContents.send('cookie-size-update', size);
+    }
+    // 广播给设置页面
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('cookie-size-updated', size);
+    }
+});
+
+// 饼干请求调整自身大小
+ipcMain.on('cookie-resize-self', (event, size) => {
+    if (cookieWindow && !cookieWindow.isDestroyed()) {
+        const windowSize = size + COOKIE_PADDING * 2;
+        cookieWindow.setSize(windowSize, windowSize);
+    }
+});
+
+// 同步饼干大小到设置页面
+ipcMain.on('sync-cookie-size-to-settings', (event, size) => {
+    if (typeof size === 'number') {
+        cookieSize = size;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('cookie-size-updated', size);
+        }
+    }
+});
+
+// ===== 陪伴模式窗口管理 =====
+let companionWindow = null;
+let companionWidth = 400;
+let companionHeight = 350;
+
+function createCompanionWindow() {
+    if (companionWindow && !companionWindow.isDestroyed()) {
+        companionWindow.focus();
+        return;
+    }
+
+    const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+    companionWindow = new BrowserWindow({
+        width: companionWidth,
+        height: companionHeight,
+        x: width - companionWidth - 20,
+        y: height - companionHeight - 80,
+        frame: false,
+        transparent: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        hasShadow: false,
+        resizable: false,
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload.js')
+        }
+    });
+
+    companionWindow.loadFile(path.join(__dirname, 'companion.html'));
+    companionWindow.setIgnoreMouseEvents(false);
+
+    // 加载完成后立即同步当前配置
+    companionWindow.webContents.on('did-finish-load', () => {
+        if (companionWindow && !companionWindow.isDestroyed()) {
+            const config = { zhipuApiKey, multimodalEnabled, costSavingEnabled, aiPrompt, voiceEnabled, selectedVoice, voiceVolume, companionFontSize, companionPetSize, stickerPack };
+            companionWindow.webContents.send('config-updated', config);
+        }
+    });
+
+    companionWindow.on('closed', () => {
+        companionWindow = null;
+        companionModeActive = false;
+    });
+}
+
+// 陪伴模式激活标记，阻止 minimize 事件创建浮窗
+let companionModeActive = false;
+
+// IPC: 进入陪伴模式
+ipcMain.on('enter-companion-mode', () => {
+    companionModeActive = true;
+    // 保存用户之前的成本节省设置
+    const previousCostSaving = costSavingEnabled;
+    // 自动开启节省成本
+    costSavingEnabled = true;
+    broadcastConfigUpdate();
+    // 关闭浮窗（如果存在）
+    if (floatWindow && !floatWindow.isDestroyed()) {
+        floatWindow.close();
+        floatWindow = null;
+    }
+    createCompanionWindow();
+    // 最小化主窗口
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.minimize();
+    }
+});
+
+// IPC: 退出陪伴模式
+ipcMain.on('exit-companion-mode', (event, target) => {
+    companionModeActive = false;
+    // 恢复之前的成本节省设置
+    // 从快照中恢复（如有）
+    if (companionWindow && !companionWindow.isDestroyed()) {
+        companionWindow.close();
+        companionWindow = null;
+    }
+    // 通知浮窗恢复成本节省设置
+    if (floatWindow && !floatWindow.isDestroyed()) {
+        floatWindow.webContents.send('companion-mode-ended');
+    }
+    // 根据目标恢复窗口
+    if (target === 'main' && mainWindow) {
+        mainWindow.restore();
+        mainWindow.focus();
+    } else if (target === 'chat') {
+        if (!floatWindow || floatWindow.isDestroyed()) {
+            createFloatWindow();
+        } else {
+            floatWindow.show();
+            floatWindow.focus();
+        }
+        if (mainWindow) {
+            mainWindow.restore();
+        }
+    }
+});
+
+// IPC: 设置陪伴窗口尺寸
+ipcMain.on('set-companion-window-size', (event, w, h) => {
+    const width = Math.max(200, Math.min(800, Math.round(Number(w) || companionWidth)));
+    const height = Math.max(150, Math.min(600, Math.round(Number(h) || companionHeight)));
+    companionWidth = width;
+    companionHeight = height;
+    if (companionWindow && !companionWindow.isDestroyed()) {
+        // 先解除最小/最大尺寸限制，确保窗口能向小的方向收缩
+        companionWindow.setMinimumSize(0, 0);
+        companionWindow.setMaximumSize(0, 0);
+        companionWindow.setSize(width, height);
+        companionWindow.setMinimumSize(width, height);
+        companionWindow.setMaximumSize(width, height);
+    }
+});
+
+// IPC: 移动陪伴窗口
+ipcMain.on('move-companion-window', (event, x, y) => {
+    if (companionWindow && !companionWindow.isDestroyed()) {
+        companionWindow.setPosition(Math.round(x), Math.round(y));
+    }
+});
+
+// IPC: 获取陪伴窗口位置
+ipcMain.on('get-companion-window-pos', (event) => {
+    if (companionWindow && !companionWindow.isDestroyed()) {
+        event.returnValue = companionWindow.getPosition();
+    } else {
+        event.returnValue = [0, 0];
+    }
+});
+
+// ===== TTS subprocess management =====
+let ttsProcess = null;
+let ttsReady = false;
+
+function initTTS() {
+    const pythonPath = getPythonPath();
+    const scriptPath = getResourcePath('tts_service', 'tts_server.py');
+    
+    // Check if script exists
+    if (!fs.existsSync(scriptPath)) {
+        console.warn('[TTS] TTS service script not found, TTS unavailable');
+        return;
+    }
+
+    ttsProcess = spawn(pythonPath, [scriptPath], {
+        stdio: ['pipe', 'pipe', 'pipe']
+    });
+    
+    ttsProcess.stderr.on('data', (data) => {
+        console.log(`[TTS] ${data}`);
+    });
+    
+    ttsProcess.on('close', (code) => {
+        console.log(`[TTS] Process exited, code: ${code}`);
+        ttsProcess = null;
+        ttsReady = false;
+    });
+    
+    ttsProcess.on('error', (err) => {
+        console.error(`[TTS] Failed to start: ${err.message}`);
+        ttsProcess = null;
+        ttsReady = false;
+    });
+
+    // Mark ready (wait a moment for Python to start)
+    setTimeout(() => {
+        ttsReady = true;
+        console.log('[TTS] Service ready');
+    }, 1500);
+}
+
+// TTS request queue
+let ttsRequestId = 0;
+const ttsPendingRequests = new Map();
+
+function sendTTSRequest(text, voice = 'zh-CN-XiaoxiaoNeural') {
+    return new Promise((resolve, reject) => {
+        if (!ttsProcess || !ttsReady) {
+            reject(new Error('TTS service not ready'));
+            return;
+        }
+
+        const id = ++ttsRequestId;
+        const timeout = setTimeout(() => {
+            ttsPendingRequests.delete(id);
+            reject(new Error('TTS request timeout (30s)'));
+        }, 30000);
+        ttsPendingRequests.set(id, { resolve, reject, timeout });
+
+        // Base64 encode text to avoid encoding issues across JS/Python boundary
+        const textB64 = Buffer.from(text, 'utf-8').toString('base64');
+        const request = JSON.stringify({ text: textB64, voice, request_id: id, _text_encoded: true });
+        ttsProcess.stdin.write(request + '\n');
+    });
+}
+
+// Listen for TTS response
+function setupTTSListener() {
+    if (!ttsProcess) return;
+
+    let buffer = '';
+    const handler = (data) => {
+        buffer += data.toString();
+        // Split by newline for processing
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // Keep last incomplete line
+
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+                const response = JSON.parse(line);
+                // Use request_id for precise matching
+                const rid = response.request_id;
+                const pending = rid ? ttsPendingRequests.get(rid) : undefined;
+                if (pending) {
+                    clearTimeout(pending.timeout);
+                    ttsPendingRequests.delete(rid);
+                    if (response.success) {
+                        pending.resolve(response.audio);
+                    } else {
+                        pending.reject(new Error(response.error || 'TTS synthesis failed'));
+                    }
+                } else {
+                    console.warn('[TTS] Unmatched response (no pending request for id=' + rid + '):', response);
+                }
+            } catch (e) {
+                console.error('[TTS] Response parse error:', e);
+            }
+        }
+    };
+    ttsProcess.stdout.on('data', handler);
+}
+
+// Start TTS
+function startTTS() {
+    initTTS();
+    if (ttsProcess) {
+        setTimeout(setupTTSListener, 2000);
+    }
+}
+
+// ===== IPC: TTS =====
+// Remove emoji from text before TTS synthesis (Edge TTS can't pronounce emoji)
+function removeEmojiForTTS(text) {
+    if (!text) return '';
+    try {
+        return text.replace(/\p{Emoji}/gu, '');
+    } catch (e) {
+        // Fallback regex for emoji (does not match Chinese characters)
+        return text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2702}-\u{27B0}\u{24C2}-\u{1F251}\u{1F900}-\u{1F9FF}\u{200D}\u{FE0F}\u{20E3}\u{231A}-\u{23FA}\u{25AA}-\u{25FE}\u{2600}-\u{27EF}\u{2934}-\u{2935}\u{2B05}-\u{2B55}\u{3030}\u{303D}\u{3297}\u{3299}]/gu, '');
+    }
+}
+
+ipcMain.handle('speak-text', async (event, text, voice = 'zh-CN-XiaoxiaoNeural') => {
+    if (!text) return null;
+    try {
+        // Strip emoji before TTS (Edge TTS can't speak emoji, but Chinese text is preserved)
+        const clean = removeEmojiForTTS(text);
+        const audioB64 = await sendTTSRequest(clean, voice);
+        return audioB64;
+    } catch (error) {
+        console.error('[TTS] Synthesis failed:', error.message);
+        return null;
+    }
+});
+
+// Get available voice list (Edge TTS Chinese voices)
+ipcMain.handle('get-tts-voices', async () => {
+    // Edge TTS 常见中文语音 ID
+    return [
+        'zh-CN-XiaoxiaoNeural',
+        'zh-CN-YunxiNeural',
+        'zh-CN-YunjianNeural',
+        'zh-CN-XiaoyiNeural',
+        'zh-CN-YunyangNeural',
+        'zh-CN-XiaochenNeural',
+        'zh-CN-XiaohanNeural',
+        'zh-CN-XiaomengNeural',
+        'zh-CN-XiaoruiNeural',
+        'zh-CN-XiaoshuangNeural',
+        'zh-CN-XiaoxuanNeural',
+        'zh-CN-XiaoyanNeural',
+        'zh-CN-XiaoyouNeural',
+        'zh-CN-XiaozhenNeural'
+    ];
+});
+
+// ===== STT Subprocess Management (companion mode continuous recording + auto sentence segmentation) =====
+let sttProcess = null;
+let sttReady = false;
+let sttBuffer = '';
+
+function initSTT() {
+    const pythonPath = getPythonPath();
+    const scriptPath = getResourcePath('stt_service', 'stt_server.py');
+
+    if (!fs.existsSync(scriptPath)) {
+        console.warn('[STT] STT service script not found, STT unavailable');
+        return false;
+    }
+
+    sttProcess = spawn(pythonPath, [scriptPath], {
+        stdio: ['pipe', 'pipe', 'pipe']
+    });
+
+    sttProcess.stderr.on('data', (data) => {
+        console.log(`[STT] ${data}`);
+    });
+
+    sttProcess.on('close', (code) => {
+        console.log(`[STT] Process exited, code: ${code}`);
+        sttProcess = null;
+        sttReady = false;
+    });
+
+    sttProcess.on('error', (err) => {
+        console.error(`[STT] Failed to start: ${err.message}`);
+        sttProcess = null;
+        sttReady = false;
+    });
+
+    // Timeout: warn if STT not ready within 10s
+    let sttReadyTimeout = setTimeout(() => {
+        if (!sttReady) {
+            console.warn('[STT] Service not ready within 10s, continuing anyway');
+        }
+    }, 10000);
+
+    // Listen to stdout, parse JSON line by line
+    sttProcess.stdout.on('data', (data) => {
+        sttBuffer += data.toString();
+        const lines = sttBuffer.split('\n');
+        sttBuffer = lines.pop();
+
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+                const response = JSON.parse(line);
+                if (response.type === 'ready') {
+                    sttReady = true;
+                    clearTimeout(sttReadyTimeout);
+                    console.log('[STT] Service ready');
+                    // Notify all windows STT is ready
+                    BrowserWindow.getAllWindows().forEach(win => {
+                        if (!win.isDestroyed()) win.webContents.send('stt-ready');
+                    });
+                } else if (response.type === 'final' && response.text) {
+                    // Recognition result - decode base64 if encoded by Python
+                    let text = response.text;
+                    if (response._text_encoded) {
+                        text = Buffer.from(text, 'base64').toString('utf-8');
+                    }
+                    console.log('[STT] Recognition result:', text);
+                    BrowserWindow.getAllWindows().forEach(win => {
+                        if (!win.isDestroyed()) win.webContents.send('stt-result', text);
+                    });
+                } else if (response.type === 'ended') {
+                    BrowserWindow.getAllWindows().forEach(win => {
+                        if (!win.isDestroyed()) win.webContents.send('stt-ended');
+                    });
+                }
+            } catch (e) {
+                console.error('[STT] Response parse error:', e, line);
+            }
+        }
+    });
+
+    return true;
+}
+
+// Send STT command
+function sendSTTCommand(action, data = {}) {
+    if (!sttProcess || !sttReady) {
+        console.warn('[STT] Service not ready');
+        return false;
+    }
+    try {
+        const cmd = JSON.stringify({ action, ...data });
+        sttProcess.stdin.write(cmd + '\n');
+        return true;
+    } catch (e) {
+        console.error('[STT] Send command failed:', e);
+        return false;
+    }
+}
+
+// Start STT
+function startSTT() {
+    initSTT();
+}
+
+// ===== IPC: STT streaming audio =====
+ipcMain.handle('stt-stream-init', async () => {
+    if (!sttProcess) {
+        const ok = initSTT();
+        if (!ok) return false;
+        // 等待就绪
+        await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+    if (sttReady) {
+        sendSTTCommand('init');
+        return true;
+    }
+    return false;
+});
+
+ipcMain.on('stt-stream-audio', (event, base64Data, isLast) => {
+    sendSTTCommand('audio', { data: base64Data, isLast: !!isLast });
+});
+
+ipcMain.on('stt-stream-reset', () => {
+    sendSTTCommand('reset');
+});
+
+ipcMain.on('stt-stream-end', () => {
+    sendSTTCommand('end');
+});
+
+// ===== AI 请求代理（主进程发起，避免渲染进程 SSL 网络问题） =====
+ipcMain.handle('ai-chat-request', async (event, { messages, model, maxTokens, temperature }) => {
+    if (!zhipuApiKey) throw new Error('智谱 API Key 未设置');
+
+    const body = JSON.stringify({
+        model: model || 'glm-4-flash',
+        messages: messages,
+        max_tokens: maxTokens || 60,
+        temperature: temperature || 0.8
+    });
+
+    return new Promise((resolve, reject) => {
+        const req = https.request({
+            hostname: 'open.bigmodel.cn',
+            path: '/api/paas/v4/chat/completions',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${zhipuApiKey}`,
+                'Content-Length': Buffer.byteLength(body)
+            },
+            rejectUnauthorized: false,  // 忽略 SSL 证书验证，解决 net_error -101
+            timeout: 15000
+        }, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+                try {
+                    const parsed = JSON.parse(data);
+                    if (parsed.error) {
+                        reject(new Error(parsed.error.message));
+                    } else {
+                        resolve(parsed);
+                    }
+                } catch (e) {
+                    reject(new Error(`JSON 解析失败: ${e.message}`));
+                }
+            });
+        });
+
+        req.on('error', (e) => {
+            console.error('[AI Request Error]', e.message);
+            reject(e);
+        });
+
+        req.on('timeout', () => {
+            req.destroy();
+            reject(new Error('请求超时'));
+        });
+
+        req.write(body);
+        req.end();
+    });
+});
+
+// 行为保持概率设置
+ipcMain.on('set-behavior-keep-prob', (event, prob) => {
+    if (typeof prob === 'number') {
+        config_behaviorKeepProb = prob;
+        // 广播到浮窗
+        if (floatWindow && !floatWindow.isDestroyed()) {
+            floatWindow.webContents.send('set-behavior-keep-prob', prob);
+        }
+    }
+});
+
+// 开发者模式状态同步到浮窗
+ipcMain.on('set-dev-mode', (event, enabled) => {
+    devModeEnabled = !!enabled;
+    if (floatWindow && !floatWindow.isDestroyed()) {
+        floatWindow.webContents.send('set-dev-mode', devModeEnabled);
+    }
+});
+
+// ===== 双击Ctrl生成饼干（开发者模式） =====
+// 封装生成饼干的公共函数，供 before-input-event 和 globalShortcut 共用
+function spawnCookieFromDevMode() {
+    if (!devModeEnabled) return;
+    if (cookieWindow && !cookieWindow.isDestroyed()) return; // 已有饼干
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { workArea } = primaryDisplay;
+    const margin = 80;
+    const corners = [
+        { x: workArea.x + margin, y: workArea.y + margin },
+        { x: workArea.x + workArea.width - cookieSize - margin, y: workArea.y + margin },
+        { x: workArea.x + margin, y: workArea.y + workArea.height - cookieSize - margin },
+        { x: workArea.x + workArea.width - cookieSize - margin, y: workArea.y + workArea.height - cookieSize - margin }
+    ];
+    const corner = corners[Math.floor(Math.random() * corners.length)];
+    createCookieWindow(corner.x, corner.y);
+    setTimeout(() => {
+        if (cookieWindow && !cookieWindow.isDestroyed()) {
+            cookieWindow.webContents.send('cookie-config', {
+                moveMode: floatMoveMode,
+                petGroundY: lastPetGroundY,
+                cookieSize: cookieSize
+            });
+        }
+    }, 200);
+}
+
+// ===== 多模态（智谱 AI）IPC 处理器 =====
+
+// 配置同步
+ipcMain.on('set-zhipu-key', (event, key) => {
+    zhipuApiKey = String(key || '');
+    broadcastConfigUpdate();
+});
+
+ipcMain.on('set-multimodal-enabled', (event, enabled) => {
+    multimodalEnabled = !!enabled;
+    broadcastConfigUpdate();
+});
+
+ipcMain.on('set-cost-saving', (event, enabled) => {
+    costSavingEnabled = !!enabled;
+    broadcastConfigUpdate();
+});
+
+// AI 人设同步
+ipcMain.on('set-ai-prompt', (event, prompt) => {
+    aiPrompt = String(prompt || '');
+    broadcastConfigUpdate();
+});
+
+// 语音设置同步
+ipcMain.on('set-voice-enabled', (event, enabled) => {
+    voiceEnabled = !!enabled;
+    broadcastConfigUpdate();
+});
+
+ipcMain.on('set-selected-voice', (event, voice) => {
+    selectedVoice = String(voice || 'default');
+    broadcastConfigUpdate();
+});
+
+ipcMain.on('set-voice-volume', (event, volume) => {
+    voiceVolume = parseFloat(volume) || 1.0;
+    broadcastConfigUpdate();
+});
+
+// 陪伴模式设置同步
+ipcMain.on('set-companion-font-size', (event, size) => {
+    companionFontSize = Math.max(10, Math.min(28, parseInt(size) || 14));
+    broadcastConfigUpdate();
+});
+
+ipcMain.on('set-companion-pet-size', (event, size) => {
+    companionPetSize = Math.max(80, Math.min(400, parseInt(size) || 180));
+    broadcastConfigUpdate();
+});
+
+// ===== 贴图包管理 =====
+// 扫描贴图包列表
+ipcMain.handle('list-sticker-packs', async () => {
+    const imgDir = path.join(__dirname, 'img');
+    const packs = [];
+    try {
+        const entries = fs.readdirSync(imgDir, { withFileTypes: true });
+        for (const entry of entries) {
+            if (!entry.isDirectory()) continue;
+            const packDir = path.join(imgDir, entry.name);
+            // 查找 pet 预览图（文件名以 pet 开头）
+            const files = fs.readdirSync(packDir);
+            const petFile = files.find(f => {
+                const lower = f.toLowerCase();
+                return lower.startsWith('pet') && /\.(png|jpg|jpeg|gif|webp|bmp|ico)$/i.test(f);
+            });
+            packs.push({
+                name: entry.name,
+                preview: petFile ? `img/${entry.name}/${petFile}` : null
+            });
+        }
+    } catch (e) {
+        console.error('[StickerPack] 扫描失败:', e);
+    }
+    return packs;
+});
+
+// 设置当前贴图包
+ipcMain.on('set-sticker-pack', (event, packName) => {
+    stickerPack = String(packName || '默认');
+    broadcastConfigUpdate();
+});
+
+// 获取配置
+ipcMain.handle('get-multimodal-config', () => {
+    return { zhipuApiKey, multimodalEnabled, costSavingEnabled };
+});
+
+// 屏幕捕获与分析
+ipcMain.handle('capture-screen', async (event, recentMessages) => {
+    if (!zhipuApiKey) throw new Error('智谱 API Key 未设置');
+    try {
+        const { desktopCapturer } = require('electron');
+        const sources = await desktopCapturer.getSources({
+            types: ['screen'],
+            thumbnailSize: { width: 800, height: 600 }
+        });
+        const source = sources[0];
+        if (!source) throw new Error('未找到屏幕源');
+
+        const thumbnail = source.thumbnail.toJPEG(70);
+        const base64 = thumbnail.toString('base64');
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+        const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${zhipuApiKey}`
+            },
+            signal: controller.signal,
+            body: JSON.stringify({
+                model: 'glm-4v-flash',
+                messages: [
+                    {
+                        role: 'system',
+                        content: '你是一个屏幕分析助手。请根据用户当前屏幕截图和最近的对话上下文，用一句话总结用户当前正在做什么，以及可能与对话相关的环境线索。'
+                    },
+                    {
+                        role: 'user',
+                        content: [
+                            { type: 'text', text: `最近的对话：${recentMessages || '无'}` },
+                            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
+                        ]
+                    }
+                ],
+                max_tokens: 100,
+                temperature: 0.5
+            })
+        });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`智谱 API 返回错误 (${response.status}): ${errorText.substring(0, 200)}`);
+        }
+
+        const data = await response.json();
+        if (data.error) throw new Error(data.error.message);
+        if (!data.choices || data.choices.length === 0) throw new Error('GLM-4V 无有效响应');
+        return data.choices[0].message.content.trim();
+    } catch (e) {
+        console.error('[capture-screen] 错误:', e);
+        throw e;
+    }
+});
+
+// 保存聊天记录
+ipcMain.handle('save-chat-log', async (event, content) => {
+    try {
+        const { dialog } = require('electron');
+        const now = new Date();
+        const dateStr = `${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2,'0')}${now.getDate().toString().padStart(2,'0')}_${now.getHours().toString().padStart(2,'0')}${now.getMinutes().toString().padStart(2,'0')}${now.getSeconds().toString().padStart(2,'0')}`;
+        const result = await dialog.showSaveDialog({
+            defaultPath: `chat_log_${dateStr}.txt`,
+            filters: [{ name: '文本文件', extensions: ['txt'] }]
+        });
+        if (result.canceled) {
+            return { success: false, canceled: true };
+        }
+        const fs = require('fs');
+        fs.writeFileSync(result.filePath, content, 'utf-8');
+        return { success: true, path: result.filePath };
+    } catch (e) {
+        console.error('[save-chat-log] 失败:', e.message);
+        return { success: false, error: e.message };
+    }
+});
+
+// 保存图片（从 URL 下载到本地）
+ipcMain.handle('save-image-from-url', async (event, imageUrl) => {
+    const { dialog } = require('electron');
+    const fs = require('fs');
+    const path = require('path');
+    const https = require('https');
+    const http = require('http');
+
+    const result = await dialog.showSaveDialog({
+        title: '保存图片',
+        defaultPath: `image_${Date.now()}.png`,
+        filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }]
+    });
+
+    if (result.canceled) {
+        return { success: false, canceled: true };
+    }
+
+    return new Promise((resolve) => {
+        const protocol = imageUrl.startsWith('https') ? https : http;
+        protocol.get(imageUrl, (response) => {
+            const fileStream = fs.createWriteStream(result.filePath);
+            response.pipe(fileStream);
+            fileStream.on('finish', () => {
+                fileStream.close();
+                resolve({ success: true, path: result.filePath });
+            });
+        }).on('error', (err) => {
+            fs.unlink(result.filePath, () => {});
+            resolve({ success: false, error: err.message });
+        });
+    });
+});
+
+// ===== Agent 工具系统 =====
+// 所有工具通过 execute-tool IPC 统一调用
+
+// 笔记目录路径
+const PET_NOTES_DIR = path.join(require('os').homedir(), 'Documents', 'PetNotes');
+
+// Python 工作区目录（用于临时脚本文件）
+const PET_WORKSPACE_DIR = path.join(require('os').homedir(), 'Documents', 'PetWorkspace');
+
+// ===== 程序资产管理 =====
+const PET_PROGRAMS_DIR = path.join(PET_WORKSPACE_DIR, 'programs');
+const PET_MANIFEST_PATH = path.join(PET_WORKSPACE_DIR, 'manifest.json');
+
+// 确保程序目录存在
+function ensureProgramsDir() {
+    try {
+        if (!fs.existsSync(PET_PROGRAMS_DIR)) {
+            fs.mkdirSync(PET_PROGRAMS_DIR, { recursive: true });
+        }
+    } catch (e) {
+        console.error('创建程序目录失败:', e);
+    }
+}
+
+// 读取 manifest.json，如果文件不存在则自动创建空的默认文件
+function readManifest() {
+    try {
+        ensureProgramsDir();
+        if (fs.existsSync(PET_MANIFEST_PATH)) {
+            const data = fs.readFileSync(PET_MANIFEST_PATH, 'utf-8');
+            return JSON.parse(data);
+        } else {
+            // 文件不存在时，自动创建空的默认 manifest.json
+            const defaultManifest = { programs: [] };
+            fs.writeFileSync(PET_MANIFEST_PATH, JSON.stringify(defaultManifest, null, 2), 'utf-8');
+            return defaultManifest;
+        }
+    } catch (e) {
+        console.error('读取 manifest.json 失败:', e);
+    }
+    return { programs: [] };
+}
+
+// 写入 manifest.json
+function writeManifest(manifest) {
+    try {
+        ensureProgramsDir();
+        fs.writeFileSync(PET_MANIFEST_PATH, JSON.stringify(manifest, null, 2), 'utf-8');
+        return true;
+    } catch (e) {
+        console.error('写入 manifest.json 失败:', e);
+        return false;
+    }
+}
+
+// 通过 id 查找程序
+function findProgramById(id) {
+    const manifest = readManifest();
+    return manifest.programs.find(p => p.id === id) || null;
+}
+
+// 更新程序的 lastRun 时间
+function updateProgramLastRun(id) {
+    const manifest = readManifest();
+    const idx = manifest.programs.findIndex(p => p.id === id);
+    if (idx !== -1) {
+        manifest.programs[idx].lastRun = new Date().toISOString();
+        writeManifest(manifest);
+    }
+}
+
+// 获取需要被外部 Python 子进程读取的资源文件路径。
+// tts_service / stt_service 打包后位于 resources/ 下（extraResources），
+// 不再打进 app.asar（asar 内的文件外部进程无法读取）。
+function getResourcePath(...segments) {
+    if (process.resourcesPath) {
+        const p = path.join(process.resourcesPath, ...segments);
+        if (fs.existsSync(p)) return p;
+    }
+    // 开发环境：直接从项目目录读取
+    return path.join(__dirname, ...segments);
+}
+
+// 获取嵌入式 Python 可执行文件路径
+function getPythonPath() {
+    // 打包后：resources/python/python.exe
+    const resourcesPath = process.resourcesPath
+        ? path.join(process.resourcesPath, 'python', 'python.exe')
+        : null;
+    if (resourcesPath && fs.existsSync(resourcesPath)) {
+        return resourcesPath;
+    }
+    // 开发环境：electron/python/python.exe
+    const devPath = path.join(__dirname, 'python', 'python.exe');
+    if (fs.existsSync(devPath)) {
+        return devPath;
+    }
+    // 最后尝试：系统 PATH 中的 python
+    // Linux/macOS 通常只有 python3，优先使用
+    if (process.platform !== 'win32') {
+        return 'python3';
+    }
+    return 'python';
+}
+
+// 确保笔记目录存在
+function ensureNotesDir() {
+    try {
+        if (!fs.existsSync(PET_NOTES_DIR)) {
+            fs.mkdirSync(PET_NOTES_DIR, { recursive: true });
+        }
+    } catch (e) {
+        console.error('创建笔记目录失败:', e);
+    }
+}
+
+// 应用白名单与跨平台映射
+const APP_WHITELIST = {
+    '计算器': { win: 'calc', mac: 'Calculator.app', linux: 'gnome-calculator' },
+    '记事本': { win: 'notepad', mac: 'TextEdit.app', linux: 'gedit' },
+    '浏览器': { win: 'msedge', mac: 'Google Chrome.app', linux: 'google-chrome' },
+    '微信': { win: 'wechat', mac: 'WeChat.app', linux: 'wechat' },
+    'QQ': { win: 'qq', mac: 'QQ.app', linux: 'qq' },
+    'VS Code': { win: 'code', mac: 'Visual Studio Code.app', linux: 'code' },
+    '文件管理器': { win: 'explorer', mac: 'Finder.app', linux: 'nautilus' }
+};
+
+// 获取当前平台的应用命令
+function getAppCommand(appName) {
+    const entry = APP_WHITELIST[appName];
+    if (!entry) return null;
+    const platform = process.platform;
+    if (platform === 'win32') return entry.win;
+    if (platform === 'darwin') return entry.mac;
+    return entry.linux; // linux 等
+}
+
+// 执行系统工具
+async function executeToolHandler(toolName, args) {
+    try {
+        switch (toolName) {
+            // ===== 笔记操作 =====
+            case 'write_note': {
+                const { title, content } = args || {};
+                if (!title || !content) return { success: false, error: '标题和内容不能为空' };
+                ensureNotesDir();
+                // 文件名安全处理：移除非法字符
+                const safeTitle = title.replace(/[<>:"/\\|?*]/g, '_').substring(0, 100);
+                const filePath = path.join(PET_NOTES_DIR, safeTitle + '.txt');
+                fs.writeFileSync(filePath, content, 'utf-8');
+                return { success: true, data: `笔记"${title}"已保存` };
+            }
+
+            case 'read_note': {
+                ensureNotesDir();
+                const files = fs.readdirSync(PET_NOTES_DIR).filter(f => f.endsWith('.txt'));
+                if (!args || !args.title) {
+                    // 列出所有笔记
+                    const list = files.map(f => f.replace('.txt', ''));
+                    return { success: true, data: list.length > 0 ? list.join(', ') : '暂无笔记' };
+                }
+                const safeTitle = args.title.replace(/[<>:"/\\|?*]/g, '_');
+                const filePath = path.join(PET_NOTES_DIR, safeTitle + '.txt');
+                if (!fs.existsSync(filePath)) {
+                    return { success: false, error: `笔记"${args.title}"不存在` };
+                }
+                const content = fs.readFileSync(filePath, 'utf-8');
+                return { success: true, data: content };
+            }
+
+            case 'delete_note': {
+                if (!args || !args.title) return { success: false, error: '笔记标题不能为空' };
+                ensureNotesDir();
+                const safeTitle = args.title.replace(/[<>:"/\\|?*]/g, '_');
+                const filePath = path.join(PET_NOTES_DIR, safeTitle + '.txt');
+                if (!fs.existsSync(filePath)) {
+                    return { success: false, error: `笔记"${args.title}"不存在` };
+                }
+                fs.unlinkSync(filePath);
+                return { success: true, data: `笔记"${args.title}"已删除` };
+            }
+
+            // ===== 应用操作 =====
+            case 'open_app': {
+                if (!args || !args.app) return { success: false, error: '应用名称不能为空' };
+                const cmd = getAppCommand(args.app);
+                if (!cmd) {
+                    return { success: false, error: `不支持的应用：${args.app}` };
+                }
+                const { exec } = require('child_process');
+                await new Promise((resolve, reject) => {
+                    exec(cmd, (error) => {
+                        if (error) reject(error);
+                        else resolve();
+                    });
+                });
+                return { success: true, data: `已打开${args.app}` };
+            }
+
+            case 'open_url': {
+                if (!args || !args.url) return { success: false, error: 'URL不能为空' };
+                const { exec } = require('child_process');
+                const url = args.url.startsWith('http') ? args.url : 'https://' + args.url;
+                const platform = process.platform;
+                let cmd;
+                if (platform === 'win32') cmd = `start "" "${url}"`;
+                else if (platform === 'darwin') cmd = `open "${url}"`;
+                else cmd = `xdg-open "${url}"`;
+                await new Promise((resolve, reject) => {
+                    exec(cmd, (error) => {
+                        if (error) reject(error);
+                        else resolve();
+                    });
+                });
+                return { success: true, data: `已打开网址：${url}` };
+            }
+
+            // ===== 音量操作 =====
+            case 'set_volume': {
+                if (args === undefined || args === null) return { success: false, error: '音量值不能为空' };
+                const level = typeof args === 'object' ? args.level : args;
+                if (typeof level !== 'number' || level < 0 || level > 100) {
+                    return { success: false, error: '音量值需为 0-100 的数字' };
+                }
+                const { exec } = require('child_process');
+                const platform = process.platform;
+                if (platform === 'win32') {
+                    // Windows 使用 powershell 设置音量
+                    await new Promise((resolve, reject) => {
+                        exec(`powershell -c "(New-Object -ComObject WScript.Shell).SendKeys([char]173)"`, () => resolve());
+                    });
+                } else if (platform === 'darwin') {
+                    await new Promise((resolve, reject) => {
+                        exec(`osascript -e "set volume output volume ${level}"`, (e) => e ? reject(e) : resolve());
+                    });
+                } else {
+                    // Linux: 使用 amixer 或 pactl
+                    try {
+                        await new Promise((resolve, reject) => {
+                            exec(`amixer set Master ${level}%`, (e) => e ? reject(e) : resolve());
+                        });
+                    } catch (e) {
+                        // 尝试 pactl
+                        await new Promise((resolve, reject) => {
+                            const pct = Math.round(level * 65536 / 100);
+                            exec(`pactl set-sink-volume @DEFAULT_SINK@ ${pct}`, (e) => e ? reject(e) : resolve());
+                        });
+                    }
+                }
+                return { success: true, data: `音量已设置为 ${level}%` };
+            }
+
+            case 'get_volume': {
+                const { exec } = require('child_process');
+                const platform = process.platform;
+                if (platform === 'linux') {
+                    try {
+                        const result = await new Promise((resolve, reject) => {
+                            exec('amixer get Master | grep -oP "\\d+%"', (e, stdout) => {
+                                if (e) reject(e);
+                                else resolve(stdout.trim());
+                            });
+                        });
+                        const pct = parseInt(result) || 50;
+                        return { success: true, data: pct };
+                    } catch (e) {
+                        return { success: true, data: 50 }; // 默认值
+                    }
+                } else if (platform === 'darwin') {
+                    const result = await new Promise((resolve, reject) => {
+                        exec('osascript -e "output volume of (get volume settings)"', (e, stdout) => {
+                            if (e) reject(e);
+                            else resolve(stdout.trim());
+                        });
+                    });
+                    return { success: true, data: parseInt(result) || 50 };
+                }
+                return { success: true, data: 50 };
+            }
+
+            // ===== 截屏 =====
+            case 'screenshot': {
+                const { exec } = require('child_process');
+                const desktopPath = path.join(require('os').homedir(), 'Desktop');
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                const filename = `screenshot_${timestamp}.png`;
+                const filePath = path.join(desktopPath, filename);
+                const platform = process.platform;
+                if (platform === 'win32') {
+                    // Windows 截图工具
+                    await new Promise((resolve) => {
+                        exec(`powershell -c "Add-Type -AssemblyName System.Windows.Forms;[System.Windows.Forms.SendKeys]::SendWait('{PRTSC}')"`, () => resolve());
+                    });
+                    return { success: true, data: '截图已保存到剪贴板（需手动粘贴到画图工具保存）' };
+                } else if (platform === 'darwin') {
+                    await new Promise((resolve, reject) => {
+                        exec(`screencapture -x "${filePath}"`, (e) => e ? reject(e) : resolve());
+                    });
+                } else {
+                    // Linux: 使用 import (ImageMagick) 或 gnome-screenshot
+                    try {
+                        await new Promise((resolve, reject) => {
+                            exec(`gnome-screenshot -f "${filePath}"`, (e) => e ? reject(e) : resolve());
+                        });
+                    } catch (e) {
+                        await new Promise((resolve, reject) => {
+                            exec(`import -window root "${filePath}"`, (e) => e ? reject(e) : resolve());
+                        });
+                    }
+                }
+                return { success: true, data: `截图已保存到桌面：${filename}` };
+            }
+
+            // ===== 系统信息 =====
+            case 'get_system_info': {
+                const os = require('os');
+                const cpus = os.cpus();
+                const totalMem = os.totalmem();
+                const freeMem = os.freemem();
+                const memUsage = Math.round((1 - freeMem / totalMem) * 100);
+                // CPU 使用率（瞬时采样）
+                const cpuLoad = cpus.reduce((acc, cpu) => {
+                    const total = Object.values(cpu.times).reduce((a, b) => a + b);
+                    const idle = cpu.times.idle;
+                    return acc + (1 - idle / total);
+                }, 0) / cpus.length;
+                // 磁盘信息
+                let diskUsage = 0;
+                try {
+                    const { exec } = require('child_process');
+                    const df = await new Promise((resolve) => {
+                        exec('df -h / | tail -1', (e, stdout) => resolve(stdout.trim()));
+                    });
+                    const parts = df.split(/\s+/);
+                    if (parts.length >= 5) {
+                        diskUsage = parseInt(parts[4]) || 0;
+                    }
+                } catch (e) {}
+                return {
+                    success: true,
+                    data: {
+                        cpu: Math.round(cpuLoad * 100),
+                        memory: memUsage,
+                        disk: diskUsage,
+                        platform: os.platform(),
+                        hostname: os.hostname()
+                    }
+                };
+            }
+
+            // ===== 天气查询 =====
+            case 'get_weather': {
+                if (!args || !args.city) return { success: false, error: '城市名称不能为空' };
+                const fetch = (url) => new Promise((resolve, reject) => {
+                    const http = require(url.startsWith('https') ? 'https' : 'http');
+                    http.get(url, (res) => {
+                        let data = '';
+                        res.on('data', chunk => data += chunk);
+                        res.on('end', () => resolve(data));
+                    }).on('error', reject);
+                });
+                try {
+                    const encodedCity = encodeURIComponent(args.city);
+                    const data = await fetch(`https://wttr.in/${encodedCity}?format=%C+%t+%w+%h&lang=zh`);
+                    const trimmed = data.trim();
+                    if (trimmed && trimmed.length < 50) {
+                        return { success: true, data: `${args.city}：${trimmed}` };
+                    }
+                    return { success: true, data: `${args.city}：获取天气数据失败` };
+                } catch (e) {
+                    return { success: false, error: '获取天气失败' };
+                }
+            }
+
+            // ===== 时间查询 =====
+            case 'get_time': {
+                const now = new Date();
+                const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+                const timeStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 星期${weekdays[now.getDay()]} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+                return { success: true, data: timeStr };
+            }
+
+            // ===== 翻译 =====
+            case 'translate': {
+                if (!args || !args.text) return { success: false, error: '翻译文本不能为空' };
+                const targetLang = args.target_lang || '中文';
+                // 使用 DeepSeek API 翻译（复用已有配置，但无 API key 时返回错误）
+                const fetch = (url, options) => new Promise((resolve, reject) => {
+                    const http = require(url.startsWith('https') ? 'https' : 'http');
+                    const req = http.request(url, { method: 'POST', headers: options.headers, timeout: 10000 }, (res) => {
+                        let data = '';
+                        res.on('data', chunk => data += chunk);
+                        res.on('end', () => resolve(data));
+                    });
+                    req.on('error', reject);
+                    req.write(options.body);
+                    req.end();
+                });
+                try {
+                    // 尝试使用 mymemory.translate.net 免费 API
+                    const encoded = encodeURIComponent(args.text);
+                    const data = await fetch(`https://api.mymemory.translated.net/get?q=${encoded}&langpair=auto|${targetLang === '中文' ? 'zh-CN' : 'en'}`, { headers: {} });
+                    const result = JSON.parse(data);
+                    if (result.responseStatus === 200) {
+                        return { success: true, data: result.responseData.translatedText };
+                    }
+                    return { success: true, data: `翻译结果：${args.text}` };
+                } catch (e) {
+                    return { success: false, error: '翻译失败' };
+                }
+            }
+
+            // ===== 数学计算 =====
+            case 'calculate': {
+                if (!args || !args.expression) return { success: false, error: '表达式不能为空' };
+                // 安全计算：只允许数字、运算符、括号、小数点
+                const expr = args.expression.trim();
+                // 只允许安全字符
+                if (!/^[\d+\-*/().%\s]+$/.test(expr)) {
+                    return { success: false, error: '表达式包含非法字符' };
+                }
+                try {
+                    // 使用 Function 构造器进行安全计算（比 eval 更可控）
+                    const result = new Function(`return (${expr})`)();
+                    if (typeof result === 'number' && isFinite(result)) {
+                        return { success: true, data: result };
+                    }
+                    return { success: false, error: '计算无效' };
+                } catch (e) {
+                    return { success: false, error: '计算表达式错误' };
+                }
+            }
+
+            // ===== 保存程序（原子操作：保存代码 + 注册到 manifest） =====
+            case 'save_program': {
+                console.log('[save_program] 原始 args:', JSON.stringify(args));
+
+                // ----- 1. 参数归一化（支持嵌套） -----
+                let params = args;
+                if (args && typeof args === 'object') {
+                    const nestedKeys = ['args', 'params', 'arguments'];
+                    for (const key of nestedKeys) {
+                        if (args[key] && typeof args[key] === 'object' && !Array.isArray(args[key])) {
+                            params = args[key];
+                            break;
+                        }
+                    }
+                }
+                // 如果 params 是数组，取第一个元素
+                if (Array.isArray(params)) {
+                    params = params.length > 0 ? params[0] : {};
+                }
+
+                console.log('[save_program] 归一化 params:', JSON.stringify(params));
+
+                // ----- 2. 提取字段 -----
+                let { name, description, code, id: providedId, type, tags, params: paramDefs } = params || {};
+
+                // 如果 name/description/code 仍为空，尝试从原始 args 中深度查找
+                if ((!name || !description || !code) && args && typeof args === 'object') {
+                    const deepFind = (obj, key) => {
+                        if (!obj || typeof obj !== 'object') return undefined;
+                        if (obj[key] && typeof obj[key] === 'string') return obj[key];
+                        for (const val of Object.values(obj)) {
+                            if (val && typeof val === 'object') {
+                                const found = deepFind(val, key);
+                                if (found) return found;
+                            }
+                        }
+                        return undefined;
+                    };
+                    if (!name) name = deepFind(args, 'name');
+                    if (!description) description = deepFind(args, 'description');
+                    if (!code) code = deepFind(args, 'code');
+                }
+
+                console.log('[save_program] 提取后 name:', name, 'description:', description, 'code 长度:', code ? code.length : 0);
+
+                // ----- 3. 检查必填参数 -----
+                const missing = [];
+                if (!name || typeof name !== 'string') missing.push('name');
+                if (!description || typeof description !== 'string') missing.push('description');
+                if (!code || typeof code !== 'string') missing.push('code');
+                if (missing.length > 0) {
+                    return {
+                        success: false,
+                        error: `缺少必填参数：${missing.join('、')}。当前收到的参数结构：${JSON.stringify(args)}`
+                    };
+                }
+
+                // ----- 4. 对 code 进行规范化（确保换行符被保留） -----
+                if (typeof code === 'string') {
+                    // 如果 code 不包含真实换行，但包含字面量 \n（两个字符 \\n），转换为真实换行
+                    if (!code.includes('\n') && code.includes('\\n')) {
+                        code = code.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\r/g, '\r');
+                    }
+                    // 同样处理 \\" 和 \\' 转义
+                    code = code.replace(/\\"/g, '"').replace(/\\'/g, "'");
+                }
+
+                // ----- 5. 生成 ID -----
+                const programId = providedId || name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') + '_' + Date.now().toString(36).slice(-4);
+
+                // 检查是否已存在
+                if (findProgramById(programId)) {
+                    return { success: false, error: `程序 ID "${programId}" 已存在，不允许覆盖` };
+                }
+
+                // 确定文件扩展名
+                const ext = type === 'javascript' ? 'js' : type === 'bash' ? 'sh' : type === 'html' ? 'html' : 'py';
+                const programDir = path.join(PET_PROGRAMS_DIR, programId);
+                const scriptPath = path.join(programDir, `script.${ext}`);
+
+                try {
+                    // 1. 创建程序目录
+                    fs.mkdirSync(programDir, { recursive: true });
+                    // 2. 写入代码文件
+                    fs.writeFileSync(scriptPath, code, 'utf-8');
+                    // 3. 读取现有 manifest
+                    const manifest = readManifest();
+                    // 4. 添加新程序到 manifest
+                    const newProgram = {
+                        id: programId,
+                        name,
+                        description,
+                        type: type || 'python',
+                        created: new Date().toISOString(),
+                        lastRun: '',
+                        tags: tags || [],
+                        version: 1,
+                        hasCode: true,
+                        params: paramDefs || []
+                    };
+                    manifest.programs.push(newProgram);
+                    // 5. 写入 manifest
+                    if (!writeManifest(manifest)) {
+                        throw new Error('写入 manifest 失败');
+                    }
+                    console.log('[save_program] 成功:', programId);
+                    return { success: true, data: newProgram };
+                } catch (e) {
+                    // 原子操作失败：回滚文件创建
+                    if (fs.existsSync(programDir)) {
+                        fs.rmSync(programDir, { recursive: true, force: true });
+                    }
+                    return { success: false, error: '保存程序失败：' + e.message };
+                }
+            }
+
+            // ===== 手动添加程序（仅注册元信息到 manifest，不创建代码文件） =====
+            case 'add_program': {
+                const { name, description, id: providedId, type = 'python', tags = [], params = [] } = args;
+                if (!name || !description) {
+                    return { success: false, error: '名称和描述为必填项' };
+                }
+                // 生成程序 ID
+                let programId = providedId;
+                if (programId) {
+                    // 校验用户提供的 ID：只能包含字母、数字、下划线
+                    if (!/^[a-zA-Z0-9_]+$/.test(programId)) {
+                        return { success: false, error: '程序 ID 只能包含字母、数字和下划线' };
+                    }
+                } else {
+                    programId = name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+                }
+                // 检查程序是否已存在
+                if (findProgramById(programId)) {
+                    return { success: false, error: `程序 ID "${programId}" 已存在，请使用其他名称` };
+                }
+                try {
+                    const manifest = readManifest();
+                    const newProgram = {
+                        id: programId,
+                        name,
+                        description,
+                        type,
+                        created: new Date().toISOString(),
+                        lastRun: '',
+                        tags: tags || [],
+                        params: params || [],
+                        version: 1,
+                        hasCode: false // 标记无代码文件
+                    };
+                    manifest.programs.push(newProgram);
+                    if (!writeManifest(manifest)) {
+                        throw new Error('写入 manifest 失败');
+                    }
+                    return { success: true, data: newProgram };
+                } catch (e) {
+                    return { success: false, error: '添加程序失败：' + e.message };
+                }
+            }
+
+            // ===== 程序资产管理 =====
+            case 'list_programs': {
+                const manifest = readManifest();
+                const list = manifest.programs.map(p => ({
+                    id: p.id,
+                    name: p.name,
+                    description: p.description,
+                    tags: p.tags || []
+                }));
+                return { success: true, data: list };
+            }
+
+            case 'describe_program': {
+                if (!args || !args.id) return { success: false, error: '程序 ID 不能为空' };
+                const program = findProgramById(args.id);
+                if (!program) return { success: false, error: `程序"${args.id}"不存在` };
+                // 返回完整信息（不含代码内容）
+                return {
+                    success: true,
+                    data: {
+                        id: program.id,
+                        name: program.name,
+                        description: program.description,
+                        type: program.type,
+                        created: program.created,
+                        lastRun: program.lastRun,
+                        tags: program.tags || [],
+                        params: program.params || []
+                    }
+                };
+            }
+
+            case 'run_program': {
+                if (!args || !args.id) return { success: false, error: '程序 ID 不能为空' };
+                const program = findProgramById(args.id);
+                if (!program) return { success: false, error: `程序"${args.id}"不存在` };
+                // 检查是否有代码文件
+                if (program.hasCode === false) {
+                    return { success: false, error: `该程序暂无代码，请使用 update_program 工具添加代码` };
+                }
+                const { exec } = require('child_process');
+                // 检查参数是否完整
+                if (program.params && program.params.length > 0) {
+                    const missingParams = program.params.filter(p => !args.params || args.params[p.name] === undefined);
+                    if (missingParams.length > 0) {
+                        return {
+                            success: false,
+                            error: `缺少必要参数：${missingParams.map(p => p.name + (p.description ? '(' + p.description + ')' : '')).join('、')}`
+                        };
+                    }
+                }
+                // 构建脚本路径
+                const ext = program.type === 'javascript' ? 'js' : program.type === 'bash' ? 'sh' : program.type === 'html' ? 'html' : 'py';
+                const scriptPath = path.join(PET_PROGRAMS_DIR, program.id, `script.${ext}`);
+                if (!fs.existsSync(scriptPath)) {
+                    return { success: false, error: `程序文件不存在：${scriptPath}` };
+                }
+                try {
+                    let result;
+                    if (program.type === 'python') {
+                        const pythonPath = getPythonPath();
+                        result = await new Promise((resolve) => {
+                            exec(
+                                `"${pythonPath}" "${scriptPath}"`,
+                                {
+                                    cwd: path.join(PET_PROGRAMS_DIR, program.id),
+                                    timeout: 30000,
+                                    maxBuffer: 1024 * 1024,
+                                    env: { ...process.env, PROGRAM_PARAMS: JSON.stringify(args.params || {}) }
+                                },
+                                (error, stdout, stderr) => {
+                                    resolve({
+                                        stdout: stdout || '',
+                                        stderr: stderr || '',
+                                        exitCode: error ? (error.code || 1) : 0
+                                    });
+                                }
+                            );
+                        });
+                    } else if (program.type === 'javascript') {
+                        result = await new Promise((resolve) => {
+                            exec(
+                                `node "${scriptPath}"`,
+                                {
+                                    cwd: path.join(PET_PROGRAMS_DIR, program.id),
+                                    timeout: 30000,
+                                    maxBuffer: 1024 * 1024,
+                                    env: { ...process.env, PROGRAM_PARAMS: JSON.stringify(args.params || {}) }
+                                },
+                                (error, stdout, stderr) => {
+                                    resolve({
+                                        stdout: stdout || '',
+                                        stderr: stderr || '',
+                                        exitCode: error ? (error.code || 1) : 0
+                                    });
+                                }
+                            );
+                        });
+                    } else if (program.type === 'bash') {
+                        result = await new Promise((resolve) => {
+                            exec(
+                                `bash "${scriptPath}"`,
+                                {
+                                    cwd: path.join(PET_PROGRAMS_DIR, program.id),
+                                    timeout: 30000,
+                                    maxBuffer: 1024 * 1024,
+                                    env: { ...process.env, PROGRAM_PARAMS: JSON.stringify(args.params || {}) }
+                                },
+                                (error, stdout, stderr) => {
+                                    resolve({
+                                        stdout: stdout || '',
+                                        stderr: stderr || '',
+                                        exitCode: error ? (error.code || 1) : 0
+                                    });
+                                }
+                            );
+                        });
+                    } else if (program.type === 'html') {
+                        // 在浏览器中打开 HTML 文件
+                        await shell.openPath(scriptPath);
+                        result = { stdout: '已在浏览器中打开', stderr: '', exitCode: 0 };
+                    } else {
+                        return { success: false, error: `不支持的程序类型：${program.type}` };
+                    }
+                    // 更新 lastRun
+                    updateProgramLastRun(args.id);
+                    return { success: true, data: result };
+                } catch (e) {
+                    return { success: false, error: '程序执行失败：' + (e.message || '') };
+                }
+            }
+
+            case 'edit_program_description': {
+                if (!args || !args.id || !args.new_description) {
+                    return { success: false, error: '程序 ID 和新描述不能为空' };
+                }
+                const manifest = readManifest();
+                const idx = manifest.programs.findIndex(p => p.id === args.id);
+                if (idx === -1) return { success: false, error: `程序"${args.id}"不存在` };
+                manifest.programs[idx].description = args.new_description;
+                if (writeManifest(manifest)) {
+                    return { success: true, data: `程序"${args.id}"的描述已更新` };
+                }
+                return { success: false, error: '更新描述失败' };
+            }
+
+            case 'delete_program': {
+                if (!args || !args.id) return { success: false, error: '程序 ID 不能为空' };
+                const program = findProgramById(args.id);
+                if (!program) return { success: false, error: `程序"${args.id}"不存在` };
+                // 删除程序目录
+                const programDir = path.join(PET_PROGRAMS_DIR, args.id);
+                if (fs.existsSync(programDir)) {
+                    fs.rmSync(programDir, { recursive: true, force: true });
+                }
+                // 从 manifest 中移除
+                const manifest = readManifest();
+                manifest.programs = manifest.programs.filter(p => p.id !== args.id);
+                writeManifest(manifest);
+                return { success: true, data: `程序"${args.id}"已删除` };
+            }
+
+            // ===== 导出程序（打开程序所在文件夹） =====
+            case 'export_program': {
+                if (!args || !args.id) return { success: false, error: '程序 ID 不能为空' };
+                const prog = findProgramById(args.id);
+                if (!prog) return { success: false, error: `程序"${args.id}"不存在` };
+                const programDir = path.join(PET_PROGRAMS_DIR, args.id);
+                if (!fs.existsSync(programDir)) {
+                    return { success: false, error: '程序目录不存在，该程序可能没有代码文件' };
+                }
+                await shell.openPath(programDir);
+                return { success: true, data: { message: '已打开程序文件夹' } };
+            }
+
+            // ===== 更新程序 =====
+            case 'update_program': {
+                const { id, code, description, name } = args;
+                if (!id) return { success: false, error: '程序 ID 不能为空' };
+                const program = findProgramById(id);
+                if (!program) return { success: false, error: `程序"${id}"不存在` };
+                const ext = program.type === 'javascript' ? 'js' : program.type === 'bash' ? 'sh' : program.type === 'html' ? 'html' : 'py';
+                const programDir = path.join(PET_PROGRAMS_DIR, id);
+                const scriptPath = path.join(programDir, `script.${ext}`);
+                try {
+                    // 1. 如果提供了代码，更新代码文件并设置 hasCode
+                    if (code !== undefined) {
+                        if (!fs.existsSync(programDir)) {
+                            return { success: false, error: '程序目录不存在' };
+                        }
+                        fs.writeFileSync(scriptPath, code, 'utf-8');
+                    }
+                    // 2. 更新 manifest
+                    const manifest = readManifest();
+                    const idx = manifest.programs.findIndex(p => p.id === id);
+                    if (idx === -1) return { success: false, error: `程序"${id}"不存在` };
+                    // 递增版本号
+                    const version = (manifest.programs[idx].version || 1) + 1;
+                    // 更新字段
+                    manifest.programs[idx] = {
+                        ...manifest.programs[idx],
+                        ...(name ? { name } : {}),
+                        ...(description ? { description } : {}),
+                        ...(code !== undefined ? { hasCode: true } : {}),
+                        version
+                    };
+                    if (!writeManifest(manifest)) {
+                        throw new Error('写入 manifest 失败');
+                    }
+                    return { success: true, data: { ...manifest.programs[idx], version } };
+                } catch (e) {
+                    return { success: false, error: '更新程序失败：' + e.message };
+                }
+            }
+
+            // ===== 写入临时文件（仅限保存临时文件/笔记，禁止用于保存程序代码） =====
+            case 'write_temp_file': {
+                if (!args || !args.path || !args.content) {
+                    return { success: false, error: '路径和内容不能为空' };
+                }
+                // 安全校验：路径必须在 PET_PROGRAMS_DIR 内
+                const resolvedPath = path.resolve(PET_PROGRAMS_DIR, args.path);
+                if (!resolvedPath.startsWith(PET_PROGRAMS_DIR)) {
+                    return { success: false, error: '路径不在允许范围内' };
+                }
+                // 禁止使用 write_temp_file 保存程序代码文件
+                if (args.path.endsWith('.py') || args.path.endsWith('.js') || args.path.endsWith('.sh')) {
+                    return { success: false, error: '请使用 save_program 工具保存程序代码，write_temp_file 仅限保存临时文件/笔记' };
+                }
+                try {
+                    // 确保父目录存在
+                    const dir = path.dirname(resolvedPath);
+                    if (!fs.existsSync(dir)) {
+                        fs.mkdirSync(dir, { recursive: true });
+                    }
+                    fs.writeFileSync(resolvedPath, args.content, 'utf-8');
+                    return { success: true, data: `文件已保存：${args.path}` };
+                } catch (e) {
+                    return { success: false, error: '写入文件失败：' + (e.message || '') };
+                }
+            }
+
+            // ===== Python 脚本执行 =====
+            case 'run_python': {
+                if (!args || !args.script) return { success: false, error: 'Python 脚本不能为空' };
+                const { exec } = require('child_process');
+                const os = require('os');
+                // 确保工作区目录存在
+                if (!fs.existsSync(PET_WORKSPACE_DIR)) {
+                    fs.mkdirSync(PET_WORKSPACE_DIR, { recursive: true });
+                }
+                // 写入临时脚本文件
+                const timestamp = Date.now();
+                const scriptPath = path.join(PET_WORKSPACE_DIR, `script_${timestamp}.py`);
+                fs.writeFileSync(scriptPath, args.script, 'utf-8');
+                try {
+                    const pythonPath = getPythonPath();
+                    const cmdArgs = [scriptPath];
+                    // 附加参数（可选）
+                    if (Array.isArray(args.args)) {
+                        cmdArgs.push(...args.args);
+                    }
+                    const result = await new Promise((resolve, reject) => {
+                        const child = exec(
+                            `"${pythonPath}" ${cmdArgs.map(a => `"${a}"`).join(' ')}`,
+                            {
+                                cwd: PET_WORKSPACE_DIR,
+                                timeout: 30000, // 30 秒超时
+                                maxBuffer: 1024 * 1024 // 1MB 输出缓冲
+                            },
+                            (error, stdout, stderr) => {
+                                resolve({
+                                    stdout: stdout || '',
+                                    stderr: stderr || '',
+                                    exitCode: error ? (error.code || 1) : 0
+                                });
+                            }
+                        );
+                    });
+                    return { success: true, data: result };
+                } finally {
+                    // 清理临时脚本文件
+                    try {
+                        if (fs.existsSync(scriptPath)) {
+                            fs.unlinkSync(scriptPath);
+                        }
+                    } catch (e) {
+                        // 忽略清理错误
+                    }
+                }
+            }
+
+            // ===== program 聚合工具（路由到具体工具） =====
+            case 'program': {
+                const { action, id, name, description, code, type, params, tags } = args || {};
+                if (!action) {
+                    return { success: false, error: 'program 工具需要 action 参数' };
+                }
+                switch (action) {
+                    case 'list':
+                        return await executeToolHandler('list_programs', {});
+                    case 'describe':
+                        if (!id) return { success: false, error: 'describe 需要 id 参数' };
+                        return await executeToolHandler('describe_program', { id });
+                    case 'run':
+                        if (!id) return { success: false, error: 'run 需要 id 参数' };
+                        return await executeToolHandler('run_program', { id, params });
+                    case 'save':
+                        if (!name || !description || !code) {
+                            return { success: false, error: 'save 需要 name、description、code 参数' };
+                        }
+                        return await executeToolHandler('save_program', { name, description, code, type, tags });
+                    case 'update':
+                        if (!id) return { success: false, error: 'update 需要 id 参数' };
+                        return await executeToolHandler('update_program', { id, code, description, name });
+                    case 'delete':
+                        if (!id) return { success: false, error: 'delete 需要 id 参数' };
+                        return await executeToolHandler('delete_program', { id });
+                    case 'add':
+                        if (!name || !description) {
+                            return { success: false, error: 'add 需要 name、description 参数' };
+                        }
+                        return await executeToolHandler('add_program', { name, description, id, type, tags });
+                    case 'export':
+                        if (!id) return { success: false, error: 'export 需要 id 参数' };
+                        return await executeToolHandler('export_program', { id });
+                    default:
+                        return { success: false, error: `未知的 program action: ${action}` };
+                }
+            }
+
+            // ===== 屏幕捕获（调用智谱 GLM-4V） =====
+            case 'capture_screen': {
+                const { desktopCapturer } = require('electron');
+                const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1280, height: 720 } });
+                if (!sources || sources.length === 0) {
+                    return { success: false, error: '未找到屏幕源' };
+                }
+                const source = sources[0];
+                const imgData = source.thumbnail.toDataURL();
+                const base64Match = imgData.match(/^data:image\/png;base64,(.+)/);
+                if (!base64Match) {
+                    return { success: false, error: '截图转换失败' };
+                }
+                const pngBase64 = base64Match[1];
+                const fetch = (url, options) => new Promise((resolve, reject) => {
+                    const http = require(url.startsWith('https') ? 'https' : 'http');
+                    const req = http.request(url, { method: 'POST', headers: options.headers, timeout: 30000 }, (res) => {
+                        let data = '';
+                        res.on('data', chunk => data += chunk);
+                        res.on('end', () => resolve(data));
+                    });
+                    req.on('error', reject);
+                    req.write(options.body);
+                    req.end();
+                });
+                const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${zhipuApiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: 'glm-4v-flash',
+                        messages: [
+                            {
+                                role: 'system',
+                                content: '你是一个屏幕分析助手。请用一句话总结用户当前屏幕内容。'
+                            },
+                            {
+                                role: 'user',
+                                content: [
+                                    { type: 'text', text: '请描述当前屏幕内容' },
+                                    { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${pngBase64}` } }
+                                ]
+                            }
+                        ],
+                        max_tokens: 200,
+                        temperature: 0.5
+                    })
+                });
+                const data = JSON.parse(response);
+                if (data.choices && data.choices.length > 0) {
+                    return { success: true, data: data.choices[0].message.content };
+                }
+                return { success: false, error: 'GLM-4V 无响应' };
+            }
+
+            // ===== 图像生成（调用智谱 CogView，正确格式：仅 model + prompt） =====
+            case 'generate_image': {
+                const { prompt } = args || {};
+                if (!zhipuApiKey) return { success: false, error: '智谱 API Key 未设置' };
+                if (!prompt) return { success: false, error: '提示词不能为空' };
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 45000);
+                    const startTime = Date.now();
+
+                    const requestBody = {
+                        model: 'cogview-3-flash',
+                        prompt: prompt
+                    };
+                    console.log('[generate_image] 请求体:', JSON.stringify(requestBody));
+
+                    const response = await fetch('https://open.bigmodel.cn/api/paas/v4/images/generations', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${zhipuApiKey}`
+                        },
+                        signal: controller.signal,
+                        body: JSON.stringify(requestBody)
+                    });
+                    clearTimeout(timeoutId);
+
+                    const elapsed = Date.now() - startTime;
+                    console.log(`[generate_image] 请求耗时: ${elapsed}ms, 响应状态: ${response.status}`);
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        let errorMsg = `智谱 API 返回错误 (${response.status})`;
+                        if (response.status === 401) errorMsg += '：API Key 无效或已过期';
+                        else if (response.status === 429) errorMsg += '：请求过于频繁或账户余额不足';
+                        else if (response.status === 400) errorMsg += `: ${errorText.substring(0, 300)}`;
+                        else errorMsg += `: ${errorText.substring(0, 300)}`;
+                        return { success: false, error: errorMsg };
+                    }
+
+                    const data = await response.json();
+                    console.log('[generate_image] 响应数据:', JSON.stringify(data).slice(0, 300));
+
+                    if (data.error) {
+                        return { success: false, error: `智谱 API 错误: ${data.error.message || JSON.stringify(data.error)}` };
+                    }
+
+                    if (data.data && data.data.length > 0 && data.data[0].url) {
+                        return { success: true, data: { url: data.data[0].url } };
+                    }
+
+                    return { success: false, error: 'CogView 返回数据格式异常，缺少图片 URL' };
+                } catch (e) {
+                    console.error('[generate_image tool] 错误:', e);
+                    if (e.name === 'AbortError') {
+                        return { success: false, error: '生成图片超时（45秒），请检查网络或稍后重试' };
+                    }
+                    return { success: false, error: '生成图片失败: ' + (e.message || '') };
+                }
+            }
+
+            default:
+                return { success: false, error: `未知工具：${toolName}` };
+        }
+    } catch (e) {
+        console.error(`[execute-tool] ${toolName} 执行失败:`, e);
+        return { success: false, error: e.message || '工具执行失败' };
+    }
+}
+
+// 注册 execute-tool IPC
+ipcMain.handle('execute-tool', async (event, toolName, args) => {
+    return await executeToolHandler(toolName, args);
+});
+
+// 独立的 generate-image IPC（直接调用智谱 CogView 图像生成 API）
+ipcMain.handle('generate-image', async (event, prompt, size = '1024x1024') => {
+    if (!zhipuApiKey) {
+        throw new Error('智谱 API Key 未设置，请在设置中填写');
+    }
+
+    console.log('[generate-image] 请求参数:', { prompt, size });
+
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 45000);
+
+        // 正确格式：仅 model + prompt（size 不是顶层字段）
+        const requestBody = {
+            model: 'cogview-3-flash',  // 备选：'cogview-3' 或 'cogview-4-250304'
+            prompt: prompt
+        };
+
+        console.log('[generate-image] 请求体:', JSON.stringify(requestBody));
+
+        const response = await fetch('https://open.bigmodel.cn/api/paas/v4/images/generations', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${zhipuApiKey}`
+            },
+            signal: controller.signal,
+            body: JSON.stringify(requestBody)
+        });
+        clearTimeout(timeoutId);
+
+        console.log('[generate-image] 响应状态:', response.status);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[generate-image] 错误响应:', errorText);
+            let errorMsg = `智谱 API 返回错误 (${response.status})`;
+            if (response.status === 401) errorMsg += '：API Key 无效或已过期';
+            else if (response.status === 429) errorMsg += '：请求过于频繁或账户余额不足';
+            else if (response.status === 400) errorMsg += `: ${errorText}`;
+            else errorMsg += `: ${errorText}`;
+            throw new Error(errorMsg);
+        }
+
+        const data = await response.json();
+        console.log('[generate-image] 响应数据:', JSON.stringify(data).slice(0, 300));
+
+        if (data.error) {
+            throw new Error(`智谱 API 错误: ${data.error.message || JSON.stringify(data.error)}`);
+        }
+
+        if (!data.data || !data.data[0] || !data.data[0].url) {
+            throw new Error('返回数据格式异常，缺少图片 URL');
+        }
+
+        return data.data[0].url;
+    } catch (e) {
+        console.error('[generate-image] 错误:', e);
+        if (e.name === 'AbortError') {
+            throw new Error('图像生成超时（45秒），请检查网络或稍后重试');
+        }
+        throw new Error(`图像生成失败: ${e.message}`);
+    }
+});
+
+// 方案1：在窗口 webContents 上监听 before-input-event（窗口有焦点时有效）
+let globalCtrlCount = 0;
+let globalCtrlTimer = null;
+function setupGlobalCtrlDetection(webContents) {
+    webContents.on('before-input-event', (event, input) => {
+        if (!devModeEnabled) return;
+        // 检测Ctrl键按下（非重复）
+        if (input.key === 'Control' && input.type === 'keyDown' && !input.repeat) {
+            globalCtrlCount++;
+            if (globalCtrlTimer) clearTimeout(globalCtrlTimer);
+            globalCtrlTimer = setTimeout(() => {
+                globalCtrlCount = 0;
+            }, 400);
+            if (globalCtrlCount >= 2) {
+                globalCtrlCount = 0;
+                spawnCookieFromDevMode();
+            }
+        }
+    });
+}
+
+app.whenReady().then(() => {
+    // 打印用户数据目录（设置和房间布局的存储位置）
+    console.log('[Main] userData 路径:', app.getPath('userData'));
+    console.log('[Main] localStorage 路径:', app.getPath('userData') + path.sep + 'Local Storage');
+    console.log('[Main] 内存文件路径:', app.getPath('userData') + path.sep + 'petMemory.json');
+
+    createWindow();
+    startTTS(); // Start TTS service
+    startSTT(); // Start STT service
+
+    // ===== 全局快捷键注册 =====
+    // Ctrl+Shift+C：开发者模式下生成饼干（全局有效，无需窗口焦点）
+    try {
+        globalShortcut.register('CmdOrCtrl+Shift+C', () => {
+            spawnCookieFromDevMode();
+        });
+    } catch (e) {
+        console.warn('全局快捷键注册失败:', e);
+    }
+
+    // ===== 双击Ctrl检测（窗口有焦点时的补充机制） =====
+    app.on('web-contents-created', (event, webContents) => {
+        if (webContents.getType() === 'window') {
+            setupGlobalCtrlDetection(webContents);
+        }
+    });
+
+    app.on('activate', () => {
+        if (BrowserWindow.getAllWindows().length === 0) {
+            createWindow();
+        }
+    });
+}).catch(err => {
+    console.error('app.whenReady 失败:', err);
+});
+
+app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+        // 如果开启"关闭窗口时保持运行"且用户未主动退出，则继续运行
+        if (keepRunningOnClose && !app.isQuiting) {
+            return;
+        }
+        app.quit();
+    }
+});
+
+// 终止 TTS/STT 子进程，避免退出后残留进程锁定安装目录/文件
+function killHelperProcesses() {
+    if (ttsProcess && !ttsProcess.killed) {
+        try { ttsProcess.kill(); } catch (e) {}
+        ttsProcess = null;
+    }
+    if (sttProcess && !sttProcess.killed) {
+        try { sttProcess.kill(); } catch (e) {}
+        sttProcess = null;
+    }
+}
+
+// 主进程退出时关闭浮窗和聊天窗口
+app.on('before-quit', () => {
+    // 注销全局快捷键
+    globalShortcut.unregister('CmdOrCtrl+Shift+C');
+    killHelperProcesses();
+
+    if (floatWindow && !floatWindow.isDestroyed()) {
+        floatWindow.destroy();
+        floatWindow = null;
+    }
+    if (chatWindow && !chatWindow.isDestroyed()) {
+        chatWindow.destroy();
+        chatWindow = null;
+    }
+    if (cookieWindow && !cookieWindow.isDestroyed()) {
+        cookieWindow.destroy();
+        cookieWindow = null;
+    }
+    if (companionWindow && !companionWindow.isDestroyed()) {
+        companionWindow.destroy();
+        companionWindow = null;
+    }
+});
