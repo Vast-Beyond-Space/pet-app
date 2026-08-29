@@ -7,15 +7,55 @@
  * 5. 聊天窗口加载 float.html?mode=chat，复用现有渲染逻辑
  */
 
-const { app, BrowserWindow, Menu, Tray, ipcMain, screen, nativeImage, globalShortcut, shell } = require('electron');
+const { app, BrowserWindow, Menu, Tray, ipcMain, screen, nativeImage, globalShortcut, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { spawn } = require('child_process');
+const { spawn, execSync, execFileSync } = require('child_process');
 const https = require('https');
 const http = require('http');
 
 // 禁用 GPU 缓存，避免 Windows 打包后出现 cache_util_win.cc 错误
 app.commandLine.appendSwitch('disable-gpu-cache');
+
+// 全局移除应用菜单栏（File/Edit/View/Window/Help），避免浮窗/聊天/设置窗口出现原生菜单
+Menu.setApplicationMenu(null);
+
+// 转发所有渲染进程 console 输出到主进程终端（否则渲染进程日志完全不可见）
+app.on('web-contents-created', (event, contents) => {
+    contents.on('console-message', (eventObj, levelOrDetails, messageOrLine, lineOrSource, sourceIdOrFrame) => {
+        try {
+            // Electron 新版为 (event, details) 单对象；老版为 (event, level, message, line, sourceId)
+            const isNew = levelOrDetails && typeof levelOrDetails === 'object' && levelOrDetails.message;
+            const rawLevel = isNew ? levelOrDetails.level : levelOrDetails;
+            const text = isNew ? levelOrDetails.message : messageOrLine;
+            const line = isNew ? (levelOrDetails.lineNumber !== undefined ? levelOrDetails.lineNumber : '') : lineOrSource;
+            let src = isNew ? (levelOrDetails.sourceId || '') : (sourceIdOrFrame || '');
+            // 静音无害的 Electron CSP 开发警告（正式打包后不会出现）
+            if (typeof text === 'string' && (text.includes('Electron Security Warning') || text.includes('Content-Security-Policy'))) return;
+            // sourceId 可能是内联脚本的整个 base64 内容，只保留短路径/文件名
+            if (src.startsWith('data:') || src.length > 120) src = filenameFromSource(src);
+            // level 兼容字符串与数字（0=log 1=info 2=warning 3=error）
+            let lv = 'log';
+            if (rawLevel === 'error' || rawLevel === 3) lv = 'error';
+            else if (rawLevel === 'warning' || rawLevel === 'warn' || rawLevel === 2) lv = 'warn';
+            else if (rawLevel === 'info' || rawLevel === 1) lv = 'info';
+            const tag = lv === 'error' ? '[renderer:error]' : lv === 'warn' ? '[renderer:warn]' : lv === 'info' ? '[renderer:info]' : '[renderer]';
+            console.log(tag, text, src ? '(' + src + ':' + line + ')' : '');
+        } catch (e) { /* 忽略转发失败 */ }
+    });
+});
+// 从 data URL / 完整代码中提取可读的文件名（尽量短）
+function filenameFromSource(src) {
+    try {
+        if (src.startsWith('data:')) {
+            const head = src.substring(0, 200);
+            const m = head.match(/;\s*name=([^;]+)/) || head.match(/_base64,([^]+)/);
+            return m ? String(m[1]).substring(0, 60) : 'inline-script';
+        }
+        const n = String(src).split('/').pop().split('\\').pop();
+        return n.length <= 80 ? n : 'renderer-script';
+    } catch (e) { return 'renderer'; }
+}
 
 let mainWindow;
 let floatWindow = null;
@@ -23,7 +63,6 @@ let chatWindow = null; // 新增：独立聊天窗口
 let cookieWindow = null; // 饼干窗口
 let tray = null;
 let floatPetSize = 80; // 浮窗桌宠大小，由主窗口设置同步
-let keepRunningOnClose = false; // 关闭窗口时是否保持运行
 let floatMoveMode = 'free'; // 浮窗移动模式：'free' | 'gravity'
 let floatBounceWindows = false; // 重力模式下是否碰撞窗口
 let floatShowIllust = true; // 小窗口聊天时是否显示立绘
@@ -39,7 +78,10 @@ let floatSessionId = 0; // 浮窗会话编号，用于区分不同浮窗实例�
 // ===== 多模态（智谱 AI）全局状态 =====
 let zhipuApiKey = '';
 let multimodalEnabled = false;
-let costSavingEnabled = false;
+// 多模态提供商：'deepseek' | 'zhipu'
+let multimodalProvider = 'deepseek';
+// 智谱多模态 API 地址（DeepSeek 复用 apiUrl/apiKey）
+let zhipuApiUrl = '';
 let aiPrompt = '';
 let voiceEnabled = true;
 let selectedVoice = 'default';
@@ -48,12 +90,150 @@ let companionFontSize = 14;
 let companionPetSize = 180;
 let stickerPack = '默认';
 
+// ===== 家里(主窗口)专属设置 =====
+// 由统一设置窗口(float.html?mode=settings)改动后经 sync-home-settings 同步到主进程并广播
+let windowOpacity = 1;
+let wallOpacity = 1;
+let floorOpacity = 1;
+let mainPetSize = 7.5;
+let furnitureSize = 3.8;
+let buttonSize = 40;
+let portraitAuto = true;
+
 function broadcastConfigUpdate() {
-    const config = { zhipuApiKey, multimodalEnabled, costSavingEnabled, aiPrompt, voiceEnabled, selectedVoice, voiceVolume, companionFontSize, companionPetSize, stickerPack };
+    const config = { zhipuApiKey, multimodalEnabled, multimodalProvider, zhipuApiUrl, aiPrompt, voiceEnabled, selectedVoice, voiceVolume, companionFontSize, companionPetSize, stickerPack };
     BrowserWindow.getAllWindows().forEach(win => {
         if (!win.isDestroyed()) win.webContents.send('config-updated', config);
     });
 }
+
+// 广播"家里专属设置"更新（仅在统一设置窗口改动时触发，避免干扰普通配置广播）
+function broadcastHomeSettingsUpdate() {
+    const home = { windowOpacity, wallOpacity, floorOpacity, mainPetSize, furnitureSize, buttonSize, portraitAuto, companionWidth };
+    BrowserWindow.getAllWindows().forEach(win => {
+        if (!win.isDestroyed()) win.webContents.send('home-settings-updated', home);
+    });
+}
+
+// ===== 统一配置中枢 =====
+// 不同 file:// 窗口之间不共享 localStorage，因此 float / index / 设置窗口会各自读一份 petConfig，
+// 表现为"两套独立设置"。这里以"主进程内存 + 文件"作为唯一权威配置：任何窗口改动后全量
+// config-sync 到主进程，主进程落地到 userData/petAppConfig.json 并广播 config-updated 给其它窗口，
+// 从而让所有窗口共用同一套设置并实时同步。
+let unifiedConfig = {};
+function configFile() { return path.join(app.getPath('userData'), 'petAppConfig.json'); }
+function loadUnifiedConfig() {
+    try {
+        if (fs.existsSync(configFile())) {
+            const parsed = JSON.parse(fs.readFileSync(configFile(), 'utf8'));
+            if (parsed && typeof parsed === 'object') unifiedConfig = parsed;
+        }
+    } catch (e) {}
+}
+function saveUnifiedConfig() {
+    try { fs.writeFileSync(configFile(), JSON.stringify(unifiedConfig, null, 2)); } catch (e) {}
+}
+
+// 启动时把权威配置（petAppConfig.json）回灌到主进程运行的各状态变量，
+// 否则这些变量保持默认值（如 stickerPack='默认'、zhipuApiKey=''），
+// index 启动触发的 broadcastConfigUpdate 会把旧默认值广播给设置窗口，导致设置被改回默认。
+function hydrateRuntimeFromUnified() {
+    const c = unifiedConfig;
+    if (!c || typeof c !== 'object') return;
+    if (c.zhipuApiKey != null) zhipuApiKey = c.zhipuApiKey;
+    if (c.multimodalEnabled != null) multimodalEnabled = !!c.multimodalEnabled;
+    if (c.multimodalProvider != null) multimodalProvider = c.multimodalProvider;
+    if (c.zhipuApiUrl != null) zhipuApiUrl = c.zhipuApiUrl;
+    if (c.aiPrompt != null) aiPrompt = c.aiPrompt;
+    if (c.voiceEnabled != null) voiceEnabled = !!c.voiceEnabled;
+    if (c.selectedVoice != null) selectedVoice = c.selectedVoice;
+    if (c.voiceVolume != null) voiceVolume = c.voiceVolume;
+    if (c.companionFontSize != null) companionFontSize = c.companionFontSize;
+    if (c.companionPetSize != null) companionPetSize = c.companionPetSize;
+    if (c.stickerPack != null) stickerPack = c.stickerPack;
+    if (c.floatPetSize != null) floatPetSize = c.floatPetSize;
+    if (c.floatMoveMode != null) floatMoveMode = c.floatMoveMode;
+    if (c.floatShowIllust != null) floatShowIllust = !!c.floatShowIllust;
+    if (c.cookieSpawnEnabled != null) cookieSpawnEnabled = !!c.cookieSpawnEnabled;
+}
+
+// 渲染进程启动时拉取权威配置
+ipcMain.handle('config-get', () => unifiedConfig);
+
+// 渲染进程改动配置 → 全量同步到主进程并广播给其它窗口（排除发送源，避免回声干扰拖拽）
+ipcMain.on('config-sync', (event, cfg) => {
+    if (!cfg || typeof cfg !== 'object') return;
+    unifiedConfig = { ...unifiedConfig, ...cfg };
+    // 同步到各自独立的状态变量，保持主进程运行时状态一致
+    if (cfg.zhipuApiKey != null) zhipuApiKey = cfg.zhipuApiKey;
+    if (cfg.multimodalEnabled != null) multimodalEnabled = !!cfg.multimodalEnabled;
+    if (cfg.multimodalProvider != null) multimodalProvider = cfg.multimodalProvider;
+    if (cfg.zhipuApiUrl != null) zhipuApiUrl = cfg.zhipuApiUrl;
+    if (cfg.aiPrompt != null) aiPrompt = cfg.aiPrompt;
+    if (cfg.voiceEnabled != null) voiceEnabled = !!cfg.voiceEnabled;
+    if (cfg.selectedVoice != null) selectedVoice = cfg.selectedVoice;
+    if (cfg.voiceVolume != null) voiceVolume = cfg.voiceVolume;
+    if (cfg.companionFontSize != null) companionFontSize = cfg.companionFontSize;
+    if (cfg.companionPetSize != null) companionPetSize = cfg.companionPetSize;
+    if (cfg.stickerPack != null) stickerPack = cfg.stickerPack;
+    if (cfg.windowOpacity != null) {
+        windowOpacity = cfg.windowOpacity;
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setOpacity(Math.max(0, Math.min(1, Number(windowOpacity) || 1)));
+    }
+    if (cfg.wallOpacity != null) wallOpacity = cfg.wallOpacity;
+    if (cfg.floorOpacity != null) floorOpacity = cfg.floorOpacity;
+    if (cfg.mainPetSize != null) mainPetSize = cfg.mainPetSize;
+    if (cfg.furnitureSize != null) furnitureSize = cfg.furnitureSize;
+    if (cfg.buttonSize != null) buttonSize = cfg.buttonSize;
+    if (cfg.portraitAuto != null) portraitAuto = !!cfg.portraitAuto;
+    if (cfg.companionWidth != null) companionWidth = cfg.companionWidth;
+    // ===== 浮窗专属字段：任何窗口（index/设置/浮窗）保存时都要同步到主进程运行状态并下发浮窗 =====
+    // 过去这些字段只能靠各窗口主动 set-float-* IPC 更新（applySizeSettings 等），
+    // 一旦某窗口在"收到广播刷新 UI"的被动路径里带上兜底默认值写回，就会把用户在别的
+    // 窗口设的值覆盖掉。现在统一在此兜底同步：谁保存都生效，且与用户主动操作等效。
+    if (cfg.floatPetSize != null) {
+        floatPetSize = cfg.floatPetSize;
+        safeSendToFloat('float-pet-size', floatPetSize);
+    }
+    if (cfg.floatMoveMode != null) {
+        floatMoveMode = cfg.floatMoveMode;
+        safeSendToFloat('float-move-mode', floatMoveMode);
+    }
+    if (cfg.bounceWindows != null) {
+        floatBounceWindows = !!cfg.bounceWindows;
+        safeSendToFloat('float-bounce-windows', floatBounceWindows);
+    }
+    if (cfg.cookieSpawnEnabled != null) {
+        cookieSpawnEnabled = !!cfg.cookieSpawnEnabled;
+        safeSendToFloat('cookie-spawn-enabled', cookieSpawnEnabled);
+        if (!cookieSpawnEnabled) closeCookieWindow();
+        setupMainCookieSpawner();
+    }
+    saveUnifiedConfig();
+    const senderId = event.sender.id;
+    BrowserWindow.getAllWindows().forEach(win => {
+        if (!win.isDestroyed() && win.webContents.id !== senderId) {
+            win.webContents.send('config-updated', unifiedConfig);
+        }
+    });
+});
+
+// 统一设置窗口的"家里专属"设置改动：更新主进程状态并广播，主窗口据此重新应用
+ipcMain.on('sync-home-settings', (event, data) => {
+    if (!data || typeof data !== 'object') return;
+    if (data.windowOpacity != null) {
+        windowOpacity = data.windowOpacity;
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setOpacity(Math.max(0, Math.min(1, Number(windowOpacity) || 1)));
+    }
+    if (data.wallOpacity != null) wallOpacity = data.wallOpacity;
+    if (data.floorOpacity != null) floorOpacity = data.floorOpacity;
+    if (data.mainPetSize != null) mainPetSize = data.mainPetSize;
+    if (data.furnitureSize != null) furnitureSize = data.furnitureSize;
+    if (data.buttonSize != null) buttonSize = data.buttonSize;
+    if (data.portraitAuto != null) portraitAuto = !!data.portraitAuto;
+    if (data.companionWidth != null) companionWidth = data.companionWidth;
+    broadcastHomeSettingsUpdate();
+});
 
 // 获取当前窗口运行状态的完整快照
 function getPetRuntimeState() {
@@ -64,8 +244,7 @@ function getPetRuntimeState() {
 
     return {
         isWindowMinimized: minimized,
-        keepRunningOnClose: !!keepRunningOnClose,
-        shouldPauseStats: minimized && !keepRunningOnClose,
+        shouldPauseStats: minimized,
         floatSessionId
     };
 }
@@ -116,7 +295,7 @@ function createWindow() {
 
     mainWindow.webContents.on('did-finish-load', () => {
         if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('config-updated', { zhipuApiKey, multimodalEnabled, costSavingEnabled, aiPrompt, voiceEnabled, selectedVoice, voiceVolume });
+            mainWindow.webContents.send('config-updated', { zhipuApiKey, multimodalEnabled, multimodalProvider, zhipuApiUrl, aiPrompt, voiceEnabled, selectedVoice, voiceVolume });
         }
     });
 
@@ -134,33 +313,29 @@ function createWindow() {
         mainWindow = null;
     });
 
-    // 关闭窗口时，关闭浮窗并退出（保持运行仅通过最小化实现）
+    // 关闭窗口时：关闭聊天窗口和饼干窗口，但保留浮窗（浮窗是默认桌宠窗口），应用继续在托盘运行
     mainWindow.on('close', (event) => {
-        if (keepRunningOnClose && !app.isQuiting) {
-            event.preventDefault();
-            mainWindow.hide();
-            // 隐藏时关闭饼干窗口
-            if (cookieWindow && !cookieWindow.isDestroyed()) {
-                cookieWindow.destroy();
-                cookieWindow = null;
-            }
-            if (!tray) {
-                createTray();
-            }
+        if (app.isQuiting) {
+            // 正常退出：让所有窗口关闭，由 before-quit 统一清理
+            return;
+        }
+        // 关闭聊天窗口和饼干窗口，保留浮窗继续运行
+        if (chatWindow && !chatWindow.isDestroyed()) {
+            chatWindow.destroy();
+            chatWindow = null;
+        }
+        if (cookieWindow && !cookieWindow.isDestroyed()) {
+            cookieWindow.destroy();
+            cookieWindow = null;
+        }
+        // 关闭家里窗口后自动唤醒浮窗（桌宠模式继续运行）
+        if (companionModeActive) return;
+        if (!floatWindow || floatWindow.isDestroyed()) {
+            createFloatWindow();
         } else {
-            // 正常关闭：销毁浮窗、聊天窗口和饼干窗口
-            if (floatWindow && !floatWindow.isDestroyed()) {
-                floatWindow.destroy();
-                floatWindow = null;
-            }
-            if (chatWindow && !chatWindow.isDestroyed()) {
-                chatWindow.destroy();
-                chatWindow = null;
-            }
-            if (cookieWindow && !cookieWindow.isDestroyed()) {
-                cookieWindow.destroy();
-                cookieWindow = null;
-            }
+            floatWindow.show();
+            floatWindow.focus();
+            syncRuntimeStateToFloat();
         }
     });
 
@@ -169,23 +344,21 @@ function createWindow() {
         // 陪伴模式激活时不创建浮窗
         if (companionModeActive) return;
         
-        mainWindow.webContents.send('window-minimized', keepRunningOnClose);
+        mainWindow.webContents.send('window-minimized');
 
-        if (!keepRunningOnClose) {
-            if (!floatWindow || floatWindow.isDestroyed()) {
-                createFloatWindow();
-            } else {
-                syncRuntimeStateToFloat();
-            }
+        if (!floatWindow || floatWindow.isDestroyed()) {
+            createFloatWindow();
+        } else {
+            syncRuntimeStateToFloat();
         }
     });
 
     // 监听隐藏事件（macOS），也显示浮窗并通知渲染进程
     mainWindow.on('hide', () => {
         if (mainWindow.isMinimized()) {
-            mainWindow.webContents.send('window-minimized', keepRunningOnClose);
+            mainWindow.webContents.send('window-minimized');
         }
-        if (!floatWindow && mainWindow.isMinimized() && !keepRunningOnClose && !companionModeActive) {
+        if (!floatWindow && mainWindow.isMinimized() && !companionModeActive) {
             createFloatWindow();
         } else if (floatWindow && !floatWindow.isDestroyed() && mainWindow.isMinimized()) {
             syncRuntimeStateToFloat();
@@ -262,6 +435,8 @@ function restoreToSafeSize() {
 function handleMainWindowRestore() {
     if (restoringMainWindow) return;
     restoringMainWindow = true;
+    // 主窗口一旦显示（启动/恢复/唤起），关闭设置窗口，避免双窗口同时改配置
+    closeSettingsWindow();
     // 用 setTimeout 解锁兜底，防止异常中断后锁死
     let lockCleared = false;
     const clearLock = () => {
@@ -298,10 +473,9 @@ function handleMainWindowRestore() {
             mainWindow.webContents.send('window-restored');
         }
 
-        // 5. 关闭浮窗和聊天窗口
+        // 5. 隐藏浮窗（保留浮窗状态，便于"家里 ⇄ 桌宠"交换回来），关闭聊天窗口
         if (floatWindow && !floatWindow.isDestroyed()) {
-            floatWindow.close();
-            floatWindow = null;
+            floatWindow.hide();
         }
         if (chatWindow && !chatWindow.isDestroyed()) {
             chatWindow.destroy();
@@ -317,7 +491,9 @@ function handleMainWindowRestore() {
 }
 
 function createFloatWindow() {
-    const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+    // 使用 workArea 完整矩形（含 x/y 原点），避免在多显示器/非零点主屏下把桌宠放到屏幕外
+    const display = screen.getPrimaryDisplay();
+    const wa = display.workArea;
 
     floatSessionId += 1;
     const currentFloatSessionId = floatSessionId;
@@ -329,8 +505,8 @@ function createFloatWindow() {
     floatWindow = new BrowserWindow({
         width: petModeWidth,
         height: petModeHeight,
-        x: width - petModeWidth - 20,
-        y: height - petModeHeight - 20,
+        x: Math.round(wa.x + (wa.width - petModeWidth) / 2),
+        y: Math.round(wa.y + (wa.height - petModeHeight) / 2),
         frame: false,
         transparent: true,
         resizable: true,
@@ -373,7 +549,7 @@ function createFloatWindow() {
         });
 
         // 推送多模态配置
-        floatWindow.webContents.send('config-updated', { zhipuApiKey, multimodalEnabled, costSavingEnabled, aiPrompt, voiceEnabled, selectedVoice, voiceVolume });
+        floatWindow.webContents.send('config-updated', { zhipuApiKey, multimodalEnabled, multimodalProvider, zhipuApiUrl, aiPrompt, voiceEnabled, selectedVoice, voiceVolume });
 
         // ===== 主进程级饼干自动生成定时器（作为 float.js 定时器的补充） =====
         setupMainCookieSpawner();
@@ -398,11 +574,12 @@ function createChatWindow() {
         height: chatHeight,
         x: Math.floor((width - chatWidth) / 2),
         y: Math.floor((height - chatHeight) / 2),
-        frame: true,            // 使用 Windows 原生标题栏
-        transparent: false,
+        frame: false,          // 无边框
+        transparent: true,     // 透明：左侧立绘栏可透出桌面
         resizable: true,
         minimizable: true,
         maximizable: true,
+        autoHideMenuBar: true,  // 隐藏原生菜单栏（File/Edit/View/Window/Help）
         alwaysOnTop: true,
         title: '聊天',
         icon: path.join(__dirname, 'img', 'icon.png'),
@@ -418,9 +595,12 @@ function createChatWindow() {
 
     // FIX: 使用原生标题栏后，拦截窗口关闭事件，先通知渲染进程完成记忆总结
     let pendingCloseConfirm = false;
+    let allowChatClose = false;
     chatWindow.on('close', (event) => {
+        // 一旦渲染进程确认完毕（allowChatClose=true），放行真正关闭，避免 preventDefault 死循环
+        if (allowChatClose) return;
+        event.preventDefault();
         if (!pendingCloseConfirm) {
-            event.preventDefault();
             pendingCloseConfirm = true;
             // 通知渲染进程：窗口即将关闭，请先完成记忆总结
             if (chatWindow && !chatWindow.isDestroyed()) {
@@ -432,6 +612,7 @@ function createChatWindow() {
     // 渲染进程完成记忆总结后，确认关闭
     ipcMain.on('chat-window-confirmed-close', () => {
         if (chatWindow && !chatWindow.isDestroyed()) {
+            allowChatClose = true;
             pendingCloseConfirm = false;
             chatWindow.close();
         }
@@ -440,6 +621,7 @@ function createChatWindow() {
     chatWindow.on('closed', () => {
         chatWindow = null;
         pendingCloseConfirm = false;
+        allowChatClose = false;
         // 聊天窗口关闭时，显示浮窗
         if (floatWindow && !floatWindow.isDestroyed()) {
             floatWindow.show();
@@ -669,10 +851,7 @@ function createTray() {
         {
             label: '显示主窗口',
             click: () => {
-                if (mainWindow) {
-                    mainWindow.show();
-                    mainWindow.focus();
-                }
+                showMainWindow();
             }
         },
         {
@@ -685,11 +864,30 @@ function createTray() {
     ]));
 
     tray.on('click', () => {
-        if (mainWindow) {
-            mainWindow.show();
-            mainWindow.focus();
-        }
+        showMainWindow();
     });
+}
+
+// 关闭设置窗口。每次 index（主窗口）启动/唤起主窗口时都必须调用，
+// 否则设置窗口与主窗口会同时编辑同一份配置（类似"两套独立设置"），
+// 出现概率性把桌宠大小 / 贴图等设置覆盖回默认的严重 bug。
+function closeSettingsWindow() {
+    if (settingsWindow && !settingsWindow.isDestroyed()) {
+        settingsWindow.close();
+        settingsWindow = null;
+    }
+}
+
+// 统一入口：唤起主窗口（家里）；若已销毁则重新创建
+function showMainWindow() {
+    closeSettingsWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+    } else {
+        createWindow();
+    }
 }
 
 // IPC 处理：恢复主窗口
@@ -697,8 +895,80 @@ ipcMain.on('restore-main-window', () => {
     handleMainWindowRestore();
 });
 
+// IPC 处理：开机自启动（设置面板"开机自启"开关）
+ipcMain.on('set-login-item', (event, enabled) => {
+    try {
+        app.setLoginItemSettings({ openAtLogin: !!enabled });
+    } catch (err) {
+        console.error('[main] set-login-item', err);
+    }
+});
+
+// IPC 处理：浮窗"回家"按钮 —— 唤起主窗口 index.html（次要窗口）
+let settingsWindow = null; // 设置面板独立窗口
+ipcMain.on('show-index-window', () => {
+    // index 启动前先关闭设置窗口，防止两边同时编辑同一份配置导致设置被重置
+    closeSettingsWindow();
+    // 回家时隐藏桌宠浮窗（桌宠回到家里主窗口）
+    if (floatWindow && !floatWindow.isDestroyed()) {
+        floatWindow.hide();
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+        return;
+    }
+    createWindow();
+});
+
+// 创建设置面板独立窗口（加载 float.html?mode=settings，复用浮窗设置 UI）
+function createSettingsWindow() {
+    if (settingsWindow && !settingsWindow.isDestroyed()) {
+        settingsWindow.focus();
+        return settingsWindow;
+    }
+    settingsWindow = new BrowserWindow({
+        width: 420,
+        height: 640,
+        resizable: true,
+        transparent: false,
+        backgroundColor: '#ffffff',
+        frame: false, // 无边框：去除原生标题栏/状态栏，由页面内 .sb-head 提供拖拽
+        title: '⚙ 设置',
+        alwaysOnTop: false,
+        autoHideMenuBar: true,
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload.js')
+        }
+    });
+    settingsWindow.loadFile(path.join(__dirname, 'float.html'), { query: { mode: 'settings' } });
+    settingsWindow.on('closed', () => { settingsWindow = null; });
+    return settingsWindow;
+}
+
+// 浮窗气泡"设置"按钮：打开设置窗口
+ipcMain.on('float-open-settings', () => {
+    createSettingsWindow();
+});
+
+// 设置面板关闭：关闭设置窗口
+ipcMain.on('settings-close', () => {
+    closeSettingsWindow();
+});
+
+// 设置面板"退出应用"按钮：退出整个应用
+ipcMain.on('app-quit', () => {
+    app.isQuiting = true;
+    app.quit();
+});
+
 // IPC 处理：打开聊天对话框
 ipcMain.on('open-chat-dialog', () => {
+    // 打开聊天（主窗口承载 UI）前也关闭设置窗口，保持"同一时刻只有一个设置编辑器"
+    closeSettingsWindow();
     if (mainWindow && !mainWindow.isDestroyed()) {
         if (mainWindow.isMinimized()) mainWindow.restore();
         mainWindow.show();
@@ -752,9 +1022,15 @@ ipcMain.on('resize-float-window', (event, w, h) => {
     if (typeof w !== 'number' || typeof h !== 'number' || !floatWindow || floatWindow.isDestroyed()) return;
     w = Math.max(60, Math.min(1400, Math.round(w)));
     h = Math.max(60, Math.min(1400, Math.round(h)));
+    const bounds = floatWindow.getBounds();
     floatWindow.setMinimumSize(0, 0);
     floatWindow.setMaximumSize(0, 0);
-    floatWindow.setSize(w, h);
+    // 高度变化时保持窗口下边缘锚定：收缩从顶部开始，桌宠贴地位置不跳动，上边缘随之下移
+    if (bounds.height !== h) {
+        floatWindow.setBounds({ x: bounds.x, y: bounds.y + (bounds.height - h), width: w, height: h });
+    } else {
+        floatWindow.setSize(w, h);
+    }
     floatWindow.setMinimumSize(w, h);
     floatWindow.setMaximumSize(w, h);
 });
@@ -783,11 +1059,6 @@ ipcMain.on('set-cookie-spawn-enabled', (event, enabled) => {
     }
     // 同步重启主进程级饼干生成器
     setupMainCookieSpawner();
-});
-
-// IPC 处理：设置关闭窗口时是否保持运行
-ipcMain.on('set-keep-running-on-close', (event, enabled) => {
-    keepRunningOnClose = !!enabled;
 });
 
 // IPC 处理：窗口控制
@@ -862,10 +1133,10 @@ ipcMain.on('float-enter-chat-mode', () => {
 ipcMain.on('float-exit-chat-mode', () => {
     // 退出后回到桌宠模式
     lastFloatMode = 'pet';
-    // 关闭聊天窗口
+    // 关闭聊天窗口：触发 close 拦截 → 渲染进程总结记忆 → confirmed-close 真正关闭。
+    // 注意此处不能把 chatWindow 置空，否则 confirmed-close 处理程序拿不到窗口引用而无法关窗。
     if (chatWindow && !chatWindow.isDestroyed()) {
         chatWindow.close();
-        chatWindow = null;
     }
     // 显示浮窗
     if (floatWindow && !floatWindow.isDestroyed()) {
@@ -873,13 +1144,13 @@ ipcMain.on('float-exit-chat-mode', () => {
     }
 });
 
-// IPC 处理：同步浮窗大小到主窗口设置
-ipcMain.on('sync-float-size-to-settings', (event, size) => {
-    floatPetSize = size;
-    // 通知主窗口更新设置 UI
-    if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('sync-float-size', size);
-    }
+// IPC 处理：同步浮窗大小到主窗口设置（已废弃）
+// 曾用于"浮窗收到 float-pet-size 后回传主窗口"，形成 config-updated 回声循环导致设置被覆盖，
+// 现大小统一走 config-sync 广播（主进程 config-sync 已兜底 floatPetSize 状态与下发），此通路移除。
+
+// IPC 处理：设置面板「▶ 状态预览」——把状态名转发给桌宠浮窗执行切换与特效
+ipcMain.on('float-preview-state', (event, state) => {
+    if (state) safeSendToFloat('float-preview-state', String(state));
 });
 
 // IPC 处理：拖出房子后最小化主窗口 + 浮窗移动到鼠标处
@@ -913,6 +1184,10 @@ ipcMain.on('minimize-and-move-float', (event, x, y) => {
         const py = Math.max(0, Math.round(y - h / 2));
         floatWindow.setPosition(px, py);
     }
+    // 浮窗可能因"回家"被隐藏，拖出房子时恢复显示（交换逻辑：家里 ⇄ 桌宠）
+    if (floatWindow && !floatWindow.isDestroyed() && !floatWindow.isVisible()) {
+        floatWindow.show();
+    }
     // 最小化主窗口
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isMinimized()) {
         mainWindow.minimize();
@@ -943,21 +1218,10 @@ ipcMain.handle('get-window-bounds', () => {
     return bounds;
 });
 
-// IPC 处理：获取记忆内容（转发到主窗口）
+// IPC 处理：获取记忆内容（直接读取文件，无需主窗口存在）
+// 浮窗作为默认窗口时，主窗口可能未创建，因此不能依赖主窗口中转
 ipcMain.handle('get-memory-items', async (event) => {
-    if (!mainWindow || mainWindow.isDestroyed()) {
-        throw new Error('Main window unavailable, cannot read memory');
-    }
-    return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Memory read timeout: main window not responding')), 5000);
-        mainWindow.webContents.send('get-memory-items-request');
-        const handler = (event, items) => {
-            clearTimeout(timeout);
-            ipcMain.removeListener('get-memory-items-response', handler);
-            resolve(items || []);
-        };
-        ipcMain.on('get-memory-items-response', handler);
-    });
+    return loadMemoryFromFile();
 });
 
 // IPC 处理：保存单条记忆（主进程直接读写文件，消除 executeJavaScript 脆弱链路）
@@ -1203,7 +1467,7 @@ function createCompanionWindow() {
     // 加载完成后立即同步当前配置
     companionWindow.webContents.on('did-finish-load', () => {
         if (companionWindow && !companionWindow.isDestroyed()) {
-            const config = { zhipuApiKey, multimodalEnabled, costSavingEnabled, aiPrompt, voiceEnabled, selectedVoice, voiceVolume, companionFontSize, companionPetSize, stickerPack };
+            const config = { zhipuApiKey, multimodalEnabled, multimodalProvider, zhipuApiUrl, aiPrompt, voiceEnabled, selectedVoice, voiceVolume, companionFontSize, companionPetSize, stickerPack };
             companionWindow.webContents.send('config-updated', config);
         }
     });
@@ -1220,11 +1484,6 @@ let companionModeActive = false;
 // IPC: 进入陪伴模式
 ipcMain.on('enter-companion-mode', () => {
     companionModeActive = true;
-    // 保存用户之前的成本节省设置
-    const previousCostSaving = costSavingEnabled;
-    // 自动开启节省成本
-    costSavingEnabled = true;
-    broadcastConfigUpdate();
     // 关闭浮窗（如果存在）
     if (floatWindow && !floatWindow.isDestroyed()) {
         floatWindow.close();
@@ -1240,13 +1499,11 @@ ipcMain.on('enter-companion-mode', () => {
 // IPC: 退出陪伴模式
 ipcMain.on('exit-companion-mode', (event, target) => {
     companionModeActive = false;
-    // 恢复之前的成本节省设置
-    // 从快照中恢复（如有）
     if (companionWindow && !companionWindow.isDestroyed()) {
         companionWindow.close();
         companionWindow = null;
     }
-    // 通知浮窗恢复成本节省设置
+    // 通知浮窗退出陪伴模式
     if (floatWindow && !floatWindow.isDestroyed()) {
         floatWindow.webContents.send('companion-mode-ended');
     }
@@ -1303,10 +1560,84 @@ ipcMain.on('get-companion-window-pos', (event) => {
 let ttsProcess = null;
 let ttsReady = false;
 
+// ===== TTS 依赖自动安装 =====
+// 运行前用与启动 TTS 相同的 Python 探测 edge_tts 是否可导入；若缺失则在运行时
+// 自动联网安装到该 Python（优先嵌入式 Python 自带 pip/ensurepip，兜底系统 pip --target），
+// 避免打包/开发环境下 postinstall 未成功导致 "ModuleNotFoundError: No module named 'edge_tts'"。
+function edgeTtsInstalled(pythonPath) {
+    try {
+        execFileSync(pythonPath, ['-c', 'import edge_tts'], { stdio: 'ignore' });
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+function runCmdQuiet(cmd) {
+    try {
+        execSync(cmd, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+// 嵌入式 Python 的 site-packages 目录；若 pythonPath 是系统命令则返回 null
+function embeddedSitePackages(pythonPath) {
+    if (!pythonPath || pythonPath === 'python' || pythonPath === 'python3' || pythonPath === 'py' || /^py -/.test(pythonPath)) {
+        return null;
+    }
+    return path.join(path.dirname(pythonPath), 'Lib', 'site-packages');
+}
+
+function ensureTTSDeps(pythonPath) {
+    if (!pythonPath) return false;
+    if (edgeTtsInstalled(pythonPath)) {
+        console.log('[TTS] edge_tts 已就绪');
+        return true;
+    }
+    console.log('[TTS] 检测到 edge_tts 缺失，尝试自动安装（可能需要联网）...');
+    const sitePackages = embeddedSitePackages(pythonPath);
+    if (sitePackages) {
+        // 方式1：嵌入式 Python 自带 pip
+        let installed = runCmdQuiet(`"${pythonPath}" -m pip install edge-tts --disable-pip-version-check`);
+        // 方式2：嵌入式 Python 无 pip 时，先引导 ensurepip 再装
+        if (!installed) {
+            installed = runCmdQuiet(`"${pythonPath}" -m ensurepip --upgrade`) &&
+                        runCmdQuiet(`"${pythonPath}" -m pip install edge-tts --disable-pip-version-check`);
+        }
+        // 方式3：兜底系统 Python/pip，--target 装入嵌入式 site-packages
+        if (!installed) {
+            for (const c of ['python', 'python3', 'py -3']) {
+                if (runCmdQuiet(`${c} -m pip install edge-tts --target "${sitePackages}" --disable-pip-version-check`)) {
+                    installed = true;
+                    break;
+                }
+            }
+        }
+        if (installed && edgeTtsInstalled(pythonPath)) {
+            console.log('[TTS] edge_tts 安装完成');
+            return true;
+        }
+    } else {
+        // 系统 Python：直接 pip install 到自身
+        if (runCmdQuiet(`"${pythonPath}" -m pip install edge-tts --disable-pip-version-check`) &&
+            edgeTtsInstalled(pythonPath)) {
+            console.log('[TTS] edge_tts 安装完成');
+            return true;
+        }
+    }
+    console.warn('[TTS] edge_tts 自动安装失败，TTS 功能暂时降级不可用。可修复后重启应用重试。');
+    return false;
+}
+
 function initTTS() {
     const pythonPath = getPythonPath();
     const scriptPath = getResourcePath('tts_service', 'tts_server.py');
     
+    // 运行前确保 edge_tts 依赖已安装
+    ensureTTSDeps(pythonPath);
+
     // Check if script exists
     if (!fs.existsSync(scriptPath)) {
         console.warn('[TTS] TTS service script not found, TTS unavailable');
@@ -1437,22 +1768,22 @@ ipcMain.handle('speak-text', async (event, text, voice = 'zh-CN-XiaoxiaoNeural')
 
 // Get available voice list (Edge TTS Chinese voices)
 ipcMain.handle('get-tts-voices', async () => {
-    // Edge TTS 常见中文语音 ID
+    // Edge TTS 常见中文语音（id + 简短描述）
     return [
-        'zh-CN-XiaoxiaoNeural',
-        'zh-CN-YunxiNeural',
-        'zh-CN-YunjianNeural',
-        'zh-CN-XiaoyiNeural',
-        'zh-CN-YunyangNeural',
-        'zh-CN-XiaochenNeural',
-        'zh-CN-XiaohanNeural',
-        'zh-CN-XiaomengNeural',
-        'zh-CN-XiaoruiNeural',
-        'zh-CN-XiaoshuangNeural',
-        'zh-CN-XiaoxuanNeural',
-        'zh-CN-XiaoyanNeural',
-        'zh-CN-XiaoyouNeural',
-        'zh-CN-XiaozhenNeural'
+        { id: 'zh-CN-XiaoxiaoNeural', desc: '晓晓 · 温暖女声，日常对话首选' },
+        { id: 'zh-CN-YunxiNeural', desc: '云希 · 阳光少年男声' },
+        { id: 'zh-CN-YunjianNeural', desc: '云健 · 沉稳男声' },
+        { id: 'zh-CN-XiaoyiNeural', desc: '晓伊 · 甜美活泼女声' },
+        { id: 'zh-CN-YunyangNeural', desc: '云扬 · 浑厚新闻男声' },
+        { id: 'zh-CN-XiaochenNeural', desc: '晓辰 · 元气少女声' },
+        { id: 'zh-CN-XiaohanNeural', desc: '晓涵 · 自然亲切女声' },
+        { id: 'zh-CN-XiaomengNeural', desc: '晓梦 · 细腻少年音' },
+        { id: 'zh-CN-XiaoruiNeural', desc: '晓睿 · 知性女声' },
+        { id: 'zh-CN-XiaoshuangNeural', desc: '晓双 · 童声可爱' },
+        { id: 'zh-CN-XiaoxuanNeural', desc: '晓萱 · 温柔女声' },
+        { id: 'zh-CN-XiaoyanNeural', desc: '晓颜 · 少儿清爽声' },
+        { id: 'zh-CN-XiaoyouNeural', desc: '晓悠 · 开心明亮女声' },
+        { id: 'zh-CN-XiaozhenNeural', desc: '晓甄 · 沉稳磁性女声' }
     ];
 });
 
@@ -1701,11 +2032,6 @@ ipcMain.on('set-multimodal-enabled', (event, enabled) => {
     broadcastConfigUpdate();
 });
 
-ipcMain.on('set-cost-saving', (event, enabled) => {
-    costSavingEnabled = !!enabled;
-    broadcastConfigUpdate();
-});
-
 // AI 人设同步
 ipcMain.on('set-ai-prompt', (event, prompt) => {
     aiPrompt = String(prompt || '');
@@ -1774,64 +2100,63 @@ ipcMain.on('set-sticker-pack', (event, packName) => {
 
 // 获取配置
 ipcMain.handle('get-multimodal-config', () => {
-    return { zhipuApiKey, multimodalEnabled, costSavingEnabled };
+    return { zhipuApiKey, multimodalEnabled, multimodalProvider, zhipuApiUrl };
 });
 
-// 屏幕捕获与分析
-ipcMain.handle('capture-screen', async (event, recentMessages) => {
-    if (!zhipuApiKey) throw new Error('智谱 API Key 未设置');
+// 打开 img 文件夹（用户添加自定义贴图包）
+ipcMain.on('open-img-folder', () => {
+    const imgDir = path.join(__dirname, 'img');
+    shell.openPath(imgDir).catch(() => {});
+});
+
+// 扫描当前贴图包内 mood_*/浮窗_* 贴图，供渲染端动态生成 AI 提示词 & 新状态
+ipcMain.handle('get-pack-assets', async () => {
+    const imgDir = path.join(__dirname, 'img');
+    const assets = { moods: [], states: [], moodFileMap: {}, stateFileMap: {} };
     try {
-        const { desktopCapturer } = require('electron');
-        const sources = await desktopCapturer.getSources({
-            types: ['screen'],
-            thumbnailSize: { width: 800, height: 600 }
+        const packName = stickerPack || '默认';
+        // 安全：只允许目录名
+        const packDir = path.join(imgDir, packName);
+        const files = fs.existsSync(packDir) ? fs.readdirSync(packDir) : [];
+        const re = /^(mood|浮窗)_(.+)\.(png|jpg|jpeg|gif|webp|bmp)$/i;
+        files.forEach(f => {
+            const m = re.exec(f);
+            if (!m) return;
+            const name = m[2];
+            const kind = m[1].toLowerCase();
+            if (kind === 'mood') {
+                if (!assets.moods.includes(name)) assets.moods.push(name);
+                if (!assets.moodFileMap[name]) assets.moodFileMap[name] = f;
+            } else {
+                // 浮窗_饼干.png 是饼干窗口专用贴图，不属于桌宠状态，不扫描进 states
+                if (name === '饼干') return;
+                if (!assets.states.includes(name)) assets.states.push(name);
+                if (!assets.stateFileMap[name]) assets.stateFileMap[name] = f;
+            }
         });
-        const source = sources[0];
-        if (!source) throw new Error('未找到屏幕源');
-
-        const thumbnail = source.thumbnail.toJPEG(70);
-        const base64 = thumbnail.toString('base64');
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-        const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${zhipuApiKey}`
-            },
-            signal: controller.signal,
-            body: JSON.stringify({
-                model: 'glm-4v-flash',
-                messages: [
-                    {
-                        role: 'system',
-                        content: '你是一个屏幕分析助手。请根据用户当前屏幕截图和最近的对话上下文，用一句话总结用户当前正在做什么，以及可能与对话相关的环境线索。'
-                    },
-                    {
-                        role: 'user',
-                        content: [
-                            { type: 'text', text: `最近的对话：${recentMessages || '无'}` },
-                            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
-                        ]
-                    }
-                ],
-                max_tokens: 100,
-                temperature: 0.5
-            })
-        });
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`智谱 API 返回错误 (${response.status}): ${errorText.substring(0, 200)}`);
+        // 同时把 默认 包里存在的 mood_/浮窗_ 也并入，保证默认贴图也能用（各包立绘可缺失，逐层回退）
+        const defDir = path.join(imgDir, '默认');
+        if (defDir !== packDir && fs.existsSync(defDir)) {
+            const defFiles = fs.readdirSync(defDir);
+            defFiles.forEach(f => {
+                const mm = re.exec(f);
+                if (!mm) return;
+                const name = mm[2];
+                const kind = mm[1].toLowerCase();
+                if (kind === 'mood' && !assets.moods.includes(name)) assets.moods.push(name);
+                else if (kind !== 'mood' && name !== '饼干' && !assets.states.includes(name)) assets.states.push(name);
+            });
         }
+    } catch (e) {
+        console.error('[PackAssets] 扫描失败:', e);
+    }
+    return assets;
+});
 
-        const data = await response.json();
-        if (data.error) throw new Error(data.error.message);
-        if (!data.choices || data.choices.length === 0) throw new Error('GLM-4V 无有效响应');
-        return data.choices[0].message.content.trim();
+// 屏幕捕获与分析（按提供商路由：deepseek / zhipu）
+ipcMain.handle('capture-screen', async (event, recentMessages) => {
+    try {
+        return await describeScreen(recentMessages);
     } catch (e) {
         console.error('[capture-screen] 错误:', e);
         throw e;
@@ -2030,6 +2355,377 @@ function getAppCommand(appName) {
     if (platform === 'darwin') return entry.mac;
     return entry.linux; // linux 等
 }
+
+// ===== DeepSeek Files API：上传图片获取 file_id，供视觉模型使用 =====
+// 解析 API 基础地址：从 apiUrl（如 https://api.deepseek.com/v1/chat/completions）
+// 去掉末尾 /chat/completions，保留路径前缀（如 /v1），与渲染端 chat 请求地址完全一致
+function deepseekApiBase() {
+    const url = (unifiedConfig && unifiedConfig.apiUrl) || 'https://api.deepseek.com/v1/chat/completions';
+    try {
+        const u = new URL(url);
+        let p = u.pathname.replace(/\/chat\/completions\/?$/, '');
+        p = p.replace(/\/+$/, '');
+        return `${u.protocol}//${u.host}${p}`;
+    } catch (e) {
+        return 'https://api.deepseek.com';
+    }
+}
+
+function deepseekKey() {
+    return (unifiedConfig && unifiedConfig.apiKey) || '';
+}
+
+// 将图片 Buffer 上传到 DeepSeek Files API 并返回 file_id（手工构建 multipart，兼容无全局 FormData 的环境）
+function uploadImageToDeepSeekFiles(buffer, filename) {
+    return new Promise((resolve, reject) => {
+        const boundary = '----deepseek' + Date.now().toString(16);
+        const ext = String(filename).split('.').pop().toLowerCase();
+        const mime = ext === 'png' ? 'image/png' : 'image/jpeg';
+        const parts = [];
+        parts.push(Buffer.from(
+            `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
+            `Content-Type: ${mime}\r\n\r\n`
+        ));
+        parts.push(buffer);
+        parts.push(Buffer.from('\r\n'));
+        parts.push(Buffer.from(
+            `--${boundary}\r\nContent-Disposition: form-data; name="purpose"\r\n\r\nuser_data\r\n`
+        ));
+        parts.push(Buffer.from(`--${boundary}--\r\n`));
+        const body = Buffer.concat(parts);
+
+        const url = deepseekApiBase() + '/files';
+        const httpMod = require(url.startsWith('https') ? 'https' : 'http');
+        console.log('[Files] upload image ->', url, '| key present:', !!deepseekKey()); 
+        const req = httpMod.request(url, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${deepseekKey()}`,
+                'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                'Content-Length': body.length
+            },
+            timeout: 30000
+        }, (res) => {
+            let data = '';
+            res.on('data', c => data += c);
+            res.on('end', () => {
+                console.log('[Files] upload response status:', res.statusCode, '| headers:', JSON.stringify(res.headers));
+                try {
+                    const j = JSON.parse(data);
+                    if (res.statusCode >= 300 || j.error) {
+                        reject(new Error('Files 上传失败: ' + (j.error && j.error.message ? j.error.message : data.substring(0, 200))));
+                    } else if (j.id) {
+                        resolve(j.id);
+                    } else {
+                        reject(new Error('Files 未返回 file_id'));
+                    }
+                } catch (e) { reject(e); }
+            });
+        });
+        req.on('error', (err) => {
+            console.error('[Files] upload network error ->', url, '| code:', err && err.code, '| errno:', err && err.errno, '| address:', err && err.address, '| port:', err && err.port, '| msg:', err && err.message, '\n', err && err.stack);
+            reject(err);
+        });
+        req.on('timeout', () => {
+            console.error('[Files] upload timeout ->', url);
+            req.destroy(new Error('Files 上传超时'));
+        });
+        req.end(body);
+    });
+}
+
+// 统一的屏幕描述能力：按多模态提供商（deepseek / zhipu）路由
+async function describeScreen(recentMessages) {
+    const { desktopCapturer } = require('electron');
+    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1600, height: 900 } });
+    if (!sources || sources.length === 0) throw new Error('未找到屏幕源');
+    const source = sources[0];
+    const provider = multimodalProvider || 'deepseek';
+
+    if (provider === 'zhipu') {
+        if (!zhipuApiKey) throw new Error('智谱 API Key 未设置');
+        const base64 = source.thumbnail.toJPEG(70).toString('base64');
+        const zurl = (zhipuApiUrl || 'https://open.bigmodel.cn/api/paas/v4/chat/completions');
+        const zresp = await fetch(zurl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${zhipuApiKey}` },
+            body: JSON.stringify({
+                model: 'glm-4v-flash',
+                messages: [
+                    { role: 'system', content: '你是一个屏幕分析助手。请根据用户当前屏幕截图和最近的对话上下文，用一句话总结用户当前正在做什么。' },
+                    { role: 'user', content: [
+                        { type: 'text', text: `最近的对话：${recentMessages || '无'}` },
+                        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
+                    ] }
+                ],
+                max_tokens: 100,
+                temperature: 0.5
+            })
+        });
+        const zdata = await zresp.json();
+        if (!zdata.choices || zdata.choices.length === 0) throw new Error('GLM-4V 无有效响应');
+        return zdata.choices[0].message.content.trim();
+    }
+
+    // 默认 DeepSeek 视觉模型：上传截图到 Files API 获取 file_id 后分析
+    if (!deepseekKey()) throw new Error('DeepSeek API Key 未设置');
+    const fileId = await uploadImageToDeepSeekFiles(source.thumbnail.toPNG(), 'screenshot.png');
+    const dresp = await fetch(deepseekApiBase() + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${deepseekKey()}` },
+        body: JSON.stringify({
+            model: 'deepseek-v4-flash-vision-exp',
+            messages: [{ role: 'user', content: [
+                { type: 'file', file_id: fileId },
+                { type: 'text', text: `请根据用户当前屏幕截图和最近的对话上下文，用一句话总结用户当前正在做什么，以及可能与对话相关的环境线索。\n最近的对话：${recentMessages || '无'}` }
+            ] }],
+            max_tokens: 100,
+            temperature: 0.5
+        })
+    });
+    const ddata = await dresp.json();
+    if (!ddata.choices || !ddata.choices[0] || !ddata.choices[0].message) {
+        throw new Error((ddata.error && ddata.error.message) || 'DeepSeek 视觉模型无有效响应');
+    }
+    return ddata.choices[0].message.content.trim();
+}
+
+// ===== 多模态聊天截图：上传 Files API + 本地缓存 + 删除 + 列表（供图像记忆使用）=====
+const screenshotCacheDir = path.join(app.getPath('userData'), 'screenshotCache');
+
+function ensureScreenshotCacheDir() {
+    try { if (!fs.existsSync(screenshotCacheDir)) fs.mkdirSync(screenshotCacheDir, { recursive: true }); } catch (e) {}
+}
+
+// 把已上传的截图写入本地缓存，返回 {imagePath, imageUrl}（ext 默认 png，兼容任意图片格式）
+function cacheScreenshot(fileId, buffer, ext = 'png') {
+    ensureScreenshotCacheDir();
+    const safeName = String(fileId).replace(/[^a-zA-Z0-9-_]/g, '_') + '.' + String(ext).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const imagePath = path.join(screenshotCacheDir, safeName);
+    try { fs.writeFileSync(imagePath, buffer); } catch (e) { console.error('[cacheScreenshot]', e); }
+    let imageUrl = '';
+    try { imageUrl = require('url').pathToFileURL(imagePath).href; } catch (e) {}
+    return { imagePath, imageUrl };
+}
+
+// 截屏 -> 上传 Files API -> 本地缓存，返回 {fileId, imagePath, imageUrl}
+ipcMain.handle('multimodal-upload-screenshot', async () => {
+    console.log('[Files] start screenshot upload | apiUrl:', (unifiedConfig && unifiedConfig.apiUrl) || '(empty)', '| derived base:', deepseekApiBase());
+    try {
+        const { desktopCapturer } = require('electron');
+        const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1600, height: 900 } });
+        if (!sources || sources.length === 0) throw new Error('未找到屏幕源');
+        if (!deepseekKey()) throw new Error('DeepSeek API Key 未设置');
+        const source = sources[0];
+        const pngBuffer = source.thumbnail.toPNG();
+        console.log('[Files] screenshot captured, buffer bytes:', pngBuffer.length);
+        const fileId = await uploadImageToDeepSeekFiles(pngBuffer, `screenshot-${Date.now()}.png`);
+        console.log('[Files] upload success fileId:', fileId);
+        const { imagePath, imageUrl } = cacheScreenshot(fileId, pngBuffer);
+        console.log('[Files] local cache:', imagePath);
+        return { fileId, imagePath, imageUrl };
+    } catch (e) {
+        console.error('[Files] screenshot upload failed overall:', e && e.constructor && e.constructor.name, '| code:', e && e.code, '| msg:', e && e.message, '\n', e && e.stack);
+        throw e;
+    }
+});
+
+// 手动"添加图片记忆"：弹出文件选择框 -> 上传 Files API 获取 file_id -> 本地缓存，返回 {fileId, imagePath, imageUrl}
+ipcMain.handle('multimodal-upload-memory-image', async (event) => {
+    try {
+        const win = BrowserWindow.fromWebContents(event.sender);
+        const dlgOpts = {
+            title: '选择要添加为记忆的图片',
+            properties: ['openFile'],
+            filters: [{ name: '图片', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] }]
+        };
+        const picked = win ? await dialog.showOpenDialog(win, dlgOpts) : await dialog.showOpenDialog(dlgOpts);
+        if (!picked || picked.canceled || !picked.filePaths || picked.filePaths.length === 0) {
+            return { canceled: true };
+        }
+        const filePath = picked.filePaths[0];
+        if (!deepseekKey()) throw new Error('DeepSeek API Key 未设置');
+        const buffer = fs.readFileSync(filePath);
+        if (!buffer || buffer.length === 0) throw new Error('图片文件为空');
+        const filename = path.basename(filePath);
+        console.log('[Files] memory image upload start | bytes:', buffer.length, '| file:', filename);
+        const fileId = await uploadImageToDeepSeekFiles(buffer, filename);
+        const extMatch = filename.match(/\.([a-zA-Z0-9]+)$/);
+        const ext = extMatch ? extMatch[1] : 'png';
+        const { imagePath, imageUrl } = cacheScreenshot(fileId, buffer, ext);
+        console.log('[Files] memory image uploaded fileId:', fileId, '| cached:', imagePath);
+        return { canceled: false, fileId, imagePath, imageUrl, filename };
+    } catch (e) {
+        console.error('[Files] memory image upload failed:', e && e.stack, '| msg:', e && e.message);
+        throw e;
+    }
+});
+
+// 删除 Files API 上的文件（DELETE /files/{file_id}）
+function deleteDeepSeekFile(fileId) {
+    return new Promise((resolve, reject) => {
+        const url = `${deepseekApiBase()}/files/${encodeURIComponent(String(fileId))}`;
+        const httpMod = require(url.startsWith('https') ? 'https' : 'http');
+        console.log('[Files] delete file ->', url, '| key present:', !!deepseekKey());
+        const req = httpMod.request(url, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${deepseekKey()}` },
+            timeout: 30000
+        }, (res) => {
+            let data = '';
+            res.on('data', c => data += c);
+            res.on('end', () => {
+                console.log('[Files] delete response status:', res.statusCode, '| body:', data.substring(0, 200));
+                let j = null;
+                try { j = data ? JSON.parse(data) : null; } catch (e) { j = null; }
+                // 2xx 或 404（文件本就不存在）都算删除成功
+                if (res.statusCode >= 200 && res.statusCode < 300) {
+                    resolve({ success: true, fileId });
+                } else if (res.statusCode === 404) {
+                    resolve({ success: true, fileId, alreadyGone: true });
+                } else {
+                    resolve({ success: false, status: res.statusCode, message: (j && j.error && j.error.message) || data.substring(0, 200) });
+                }
+            });
+        });
+        req.on('error', (err) => {
+            console.error('[Files] delete network error ->', url, '| code:', err && err.code, '| errno:', err && err.errno, '| address:', err && err.address, '| port:', err && err.port, '| msg:', err && err.message, '\n', err && err.stack);
+            reject(err);
+        });
+        req.on('timeout', () => {
+            console.error('[Files] delete timeout ->', url);
+            req.destroy(new Error('删除文件超时'));
+        });
+        req.end();
+    });
+}
+
+ipcMain.handle('multimodal-delete-file', async (event, fileId) => {
+    try { return await deleteDeepSeekFile(fileId); }
+    catch (e) { console.error('[multimodal-delete-file]', e); return { success: false, message: e.message }; }
+});
+
+// 列出账号下所有文件（GET /files），返回 {ids:[], data:[]}
+function listDeepSeekFiles() {
+    return new Promise((resolve, reject) => {
+        const url = `${deepseekApiBase()}/files`;
+        const httpMod = require(url.startsWith('https') ? 'https' : 'http');
+        console.log('[Files] list files ->', url, '| key present:', !!deepseekKey());
+        const req = httpMod.request(url, {
+            method: 'GET',
+            headers: { 'Authorization': `Bearer ${deepseekKey()}` },
+            timeout: 30000
+        }, (res) => {
+            let data = '';
+            res.on('data', c => data += c);
+            res.on('end', () => {
+                console.log('[Files] list response status:', res.statusCode, '| body200:', data.substring(0, 200));
+                try {
+                    const j = JSON.parse(data);
+                    if (res.statusCode >= 300 || j.error) {
+                        resolve({ success: false, ids: [], data: [], status: res.statusCode, message: (j.error && j.error.message) || data.substring(0, 200) });
+                    } else {
+                        const items = Array.isArray(j.data) ? j.data : [];
+                        const ids = items.map(f => f.id).filter(Boolean);
+                        resolve({ success: true, ids, data: items });
+                    }
+                } catch (e) {
+                    resolve({ success: false, ids: [], data: [], message: '解析失败 ' + data.substring(0, 200) });
+                }
+            });
+        });
+        req.on('error', (err) => {
+            console.error('[Files] list network error ->', url, '| code:', err && err.code, '| errno:', err && err.errno, '| address:', err && err.address, '| port:', err && err.port, '| msg:', err && err.message, '\n', err && err.stack);
+            reject(err);
+        });
+        req.on('timeout', () => {
+            console.error('[Files] list timeout ->', url);
+            req.destroy(new Error('列出文件超时'));
+        });
+        req.end();
+    });
+}
+
+ipcMain.handle('multimodal-list-files', async () => {
+    try { return await listDeepSeekFiles(); }
+    catch (e) { console.error('[multimodal-list-files]', e); return { success: false, ids: [], data: [], message: e.message }; }
+});
+
+// 设置面板"测试 API 连接"：用当前填写的 Key/地址发起一次最小聊天请求，验证地址、鉴权与模型是否可用
+ipcMain.handle('ai-test-api', async (event, { provider, apiKey, apiUrl } = {}) => {
+    const start = Date.now();
+    const latencyNow = () => Date.now() - start;
+    try {
+        const p = String(provider || 'deepseek').toLowerCase();
+        const key = String(apiKey || '').trim();
+        const url = String(apiUrl || '').trim();
+        if (!key) return { ok: false, latencyMs: latencyNow(), message: '未填写 API Key' };
+        if (!url) return { ok: false, latencyMs: latencyNow(), message: '未填写 API 地址' };
+
+        const model = p === 'zhipu' ? 'glm-4-flash' : 'deepseek-v4-flash';
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000);
+        console.log('[ai-test-api] ->', url, '| model:', model, '| key present:', !!key);
+
+        let resp;
+        try {
+            resp = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+                body: JSON.stringify({
+                    model: model,
+                    messages: [{ role: 'user', content: 'ping' }],
+                    max_tokens: 1,
+                    temperature: 0.2
+                }),
+                signal: controller.signal
+            });
+        } finally {
+            clearTimeout(timeoutId);
+        }
+
+        const text = await resp.text();
+        let data = null;
+        try { data = JSON.parse(text); } catch (e) { data = null; }
+        if (!resp.ok) {
+            const msg = (data && data.error && data.error.message) ? data.error.message : text.substring(0, 300);
+            console.error('[ai-test-api] HTTP', resp.status, '->', msg);
+            return { ok: false, status: resp.status, latencyMs: latencyNow(), message: `HTTP ${resp.status}: ${msg}` };
+        }
+        if (!data || !data.choices || !data.choices[0]) {
+            return { ok: false, status: resp.status, latencyMs: latencyNow(), message: '响应异常（缺少 choices）' };
+        }
+        return { ok: true, status: resp.status, latencyMs: latencyNow(), model: model, message: '连接成功，API Key 有效' };
+    } catch (e) {
+        const aborted = e && e.name === 'AbortError';
+        console.error('[ai-test-api] error:', e);
+        return { ok: false, latencyMs: latencyNow(), message: aborted ? '请求超时（20秒）' : '请求失败: ' + (e && e.message ? e.message : e) };
+    }
+});
+
+// 删除本地缓存截图
+ipcMain.handle('multimodal-delete-cache', async (event, imagePath) => {
+    try {
+        if (imagePath && fs.existsSync(imagePath)) { fs.unlinkSync(imagePath); return { success: true }; }
+        return { success: false, message: '缓存文件不存在' };
+    } catch (e) {
+        console.error('[multimodal-delete-cache]', e);
+        return { success: false, message: e.message };
+    }
+});
+
+// 渲染进程日志转发到主进程 stdout（[renderer] 前缀，源头窗口用 tag 区分）
+ipcMain.on('renderer-log', (event, payload) => {
+    const level = payload && payload.level;
+    const msg = payload && payload.message;
+    if (level === 'error') {
+        console.error('[renderer]', msg);
+    } else if (level === 'warn') {
+        console.warn('[renderer]', msg);
+    } else {
+        console.log('[renderer]', msg);
+    }
+});
 
 // 执行系统工具
 async function executeToolHandler(toolName, args) {
@@ -2820,58 +3516,68 @@ async function executeToolHandler(toolName, args) {
 
             // ===== 屏幕捕获（调用智谱 GLM-4V） =====
             case 'capture_screen': {
+                try {
+                    const desc = await describeScreen();
+                    return { success: true, data: desc };
+                } catch (e) {
+                    console.error('[capture_screen] 错误:', e);
+                    return { success: false, error: e.message || '屏幕分析失败' };
+                }
+            }
+
+            // ===== 图像识别（DeepSeek Files API 上传截图 + 视觉模型） =====
+            case 'vision': {
+                const { question } = args || {};
+                if (!deepseekKey()) return { success: false, error: 'DeepSeek API Key 未设置' };
+                const q = (question && String(question).trim()) ? String(question).trim() : '请描述当前屏幕内容';
                 const { desktopCapturer } = require('electron');
-                const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1280, height: 720 } });
-                if (!sources || sources.length === 0) {
-                    return { success: false, error: '未找到屏幕源' };
-                }
-                const source = sources[0];
-                const imgData = source.thumbnail.toDataURL();
-                const base64Match = imgData.match(/^data:image\/png;base64,(.+)/);
-                if (!base64Match) {
-                    return { success: false, error: '截图转换失败' };
-                }
-                const pngBase64 = base64Match[1];
-                const fetch = (url, options) => new Promise((resolve, reject) => {
-                    const http = require(url.startsWith('https') ? 'https' : 'http');
-                    const req = http.request(url, { method: 'POST', headers: options.headers, timeout: 30000 }, (res) => {
-                        let data = '';
-                        res.on('data', chunk => data += chunk);
-                        res.on('end', () => resolve(data));
-                    });
-                    req.on('error', reject);
-                    req.write(options.body);
-                    req.end();
+                const sources = await desktopCapturer.getSources({
+                    types: ['screen'],
+                    thumbnailSize: { width: 1600, height: 900 }
                 });
-                const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${zhipuApiKey}`
-                    },
-                    body: JSON.stringify({
-                        model: 'glm-4v-flash',
-                        messages: [
-                            {
-                                role: 'system',
-                                content: '你是一个屏幕分析助手。请用一句话总结用户当前屏幕内容。'
-                            },
-                            {
+                if (!sources || sources.length === 0) return { success: false, error: '未找到屏幕源' };
+                const pngBuffer = sources[0].thumbnail.toPNG();
+
+                let fileId;
+                try {
+                    fileId = await uploadImageToDeepSeekFiles(pngBuffer, 'screenshot.png');
+                } catch (e) {
+                    console.error('[vision] 图片上传失败:', e);
+                    return { success: false, error: e.message || '图片上传失败' };
+                }
+
+                let visionResponse, visionData;
+                try {
+                    visionResponse = await fetch(deepseekApiBase() + '/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${deepseekKey()}`
+                        },
+                        body: JSON.stringify({
+                            model: 'deepseek-v4-flash-vision-exp',
+                            messages: [{
                                 role: 'user',
                                 content: [
-                                    { type: 'text', text: '请描述当前屏幕内容' },
-                                    { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${pngBase64}` } }
+                                    { type: 'file', file_id: fileId },
+                                    { type: 'text', text: q }
                                 ]
-                            }
-                        ],
-                        max_tokens: 200,
-                        temperature: 0.5
-                    })
-                });
-                const data = JSON.parse(response);
-                if (data.choices && data.choices.length > 0) {
-                    return { success: true, data: data.choices[0].message.content };
+                            }]
+                        })
+                    });
+                    visionData = await visionResponse.json();
+                } catch (e) {
+                    console.error('[vision] 视觉模型请求失败:', e);
+                    return { success: false, error: '视觉模型请求失败: ' + (e.message || '') };
                 }
-                return { success: false, error: 'GLM-4V 无响应' };
+
+                if (!visionResponse.ok || visionData.error) {
+                    return { success: false, error: (visionData.error && visionData.error.message) || `视觉模型调用失败 (${visionResponse.status})` };
+                }
+                if (visionData.choices && visionData.choices[0] && visionData.choices[0].message) {
+                    return { success: true, data: visionData.choices[0].message.content };
+                }
+                return { success: false, error: '视觉模型无有效响应' };
             }
 
             // ===== 图像生成（调用智谱 CogView，正确格式：仅 model + prompt） =====
@@ -3041,7 +3747,14 @@ app.whenReady().then(() => {
     console.log('[Main] localStorage 路径:', app.getPath('userData') + path.sep + 'Local Storage');
     console.log('[Main] 内存文件路径:', app.getPath('userData') + path.sep + 'petMemory.json');
 
-    createWindow();
+    // 加载上次保存的统一配置（float/index/设置窗口共用同一套）
+    loadUnifiedConfig();
+    // 把统一配置回灌到主进程运行状态，避免 index/浮窗启动时广播旧默认值把设置改回默认
+    hydrateRuntimeFromUnified();
+
+    // 默认启动浮窗（桌宠）为打开即见的首要窗口；
+    // 主窗口 index.html（家里）降级为次要窗口，由浮窗"回家"按钮唤起
+    createFloatWindow();
     startTTS(); // Start TTS service
     startSTT(); // Start STT service
 
@@ -3064,7 +3777,7 @@ app.whenReady().then(() => {
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
-            createWindow();
+            createFloatWindow();
         }
     });
 }).catch(err => {
@@ -3073,10 +3786,6 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
-        // 如果开启"关闭窗口时保持运行"且用户未主动退出，则继续运行
-        if (keepRunningOnClose && !app.isQuiting) {
-            return;
-        }
         app.quit();
     }
 });

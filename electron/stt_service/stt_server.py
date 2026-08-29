@@ -37,6 +37,13 @@ def is_speech_energy(frame_bytes, sample_rate=16000, threshold=200):
     rms = math.sqrt(sum_squares / num_samples)
     return rms > threshold
 
+# ===== 让随包发布的第三方库（cffi/vosk 等）可被 import =====
+# 嵌入式 Python 或系统 Python(--target)安装的依赖都落在 <app>/python/Lib/site-packages。
+# 直接按脚本所在路径定位，避免外部进程未设 PYTHONPATH 时找不到依赖。
+_bundle = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'python', 'Lib', 'site-packages'))
+if os.path.isdir(_bundle) and _bundle not in sys.path:
+    sys.path.insert(0, _bundle)
+
 # ===== Vosk Model Initialization =====
 MODEL_PATH = os.path.join(os.path.dirname(__file__), 'models', 'vosk-model-small-cn-0.22')
 if not os.path.exists(MODEL_PATH):

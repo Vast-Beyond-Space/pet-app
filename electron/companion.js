@@ -59,7 +59,7 @@ function loadConfig() {
             return {
                 zhipuApiKey: parsed.zhipuApiKey || '',
                 multimodalEnabled: parsed.multimodalEnabled || false,
-                costSavingEnabled: parsed.costSavingEnabled || false,
+                multimodalProvider: parsed.multimodalProvider || 'deepseek',
                 aiPrompt: parsed.aiPrompt || '你是桌宠小鲸鱼，性格活泼可爱，用简短中文回复。',
                 selectedVoice: parsed.selectedVoice || 'default',
                 voiceEnabled: parsed.voiceEnabled !== undefined ? parsed.voiceEnabled : true,
@@ -92,13 +92,27 @@ petImg.style.height = config.companionPetSize + 'px';
 // 应用贴图包
 window._stickerPack = config.stickerPack || '默认';
 
+// ===== 动态心情（依据当前贴图包 mood_*.png）：新增 mood_ 贴图会自动纳入立绘选择 =====
+function refreshMoodList() {
+    if (window.electronAPI && window.electronAPI.getPackAssets) {
+        window.electronAPI.getPackAssets().then((a) => {
+            if (a && Array.isArray(a.moods) && a.moods.length) {
+                MOOD_LIST.length = 0;
+                a.moods.forEach(m => { if (!MOOD_LIST.includes(m)) MOOD_LIST.push(m); });
+            }
+        }).catch(() => {});
+    }
+}
+refreshMoodList();
+
 // ===== 监听配置更新（与主窗口设置同步） =====
 if (window.electronAPI && window.electronAPI.onConfigUpdated) {
     window.electronAPI.onConfigUpdated((data) => {
         if (data) {
             config.zhipuApiKey = data.zhipuApiKey || config.zhipuApiKey;
             config.multimodalEnabled = data.multimodalEnabled !== undefined ? data.multimodalEnabled : config.multimodalEnabled;
-            config.costSavingEnabled = data.costSavingEnabled !== undefined ? data.costSavingEnabled : config.costSavingEnabled;
+            config.multimodalProvider = data.multimodalProvider !== undefined ? data.multimodalProvider : config.multimodalProvider;
+            if (data.zhipuApiUrl !== undefined) config.zhipuApiUrl = data.zhipuApiUrl;
             if (data.aiPrompt) {
                 config.aiPrompt = data.aiPrompt;
                 console.log('[Companion] AI 人设已更新:', data.aiPrompt.split('\n')[0]);
@@ -121,6 +135,7 @@ if (window.electronAPI && window.electronAPI.onConfigUpdated) {
             if (data.stickerPack !== undefined) {
                 config.stickerPack = data.stickerPack;
                 window._stickerPack = data.stickerPack;
+                refreshMoodList();
                 // 重新渲染立绘以应用新的贴图包
                 setMood(mood);
             }

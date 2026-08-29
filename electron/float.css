@@ -205,6 +205,44 @@ body {
     90% { transform: rotate(1deg); }
 }
 
+/* ===== 状态特效（可配置，≥10 种差异化）=====
+   上下拉伸 / 压扁回弹 / 弹跳 / 轻盈漂浮 / 左右抖动 / 旋转 / 扭动舞蹈 / 脉冲放大。
+   循环播放；Zzz 与粒子类由 JS 单独处理。 */
+.fx-stretch { animation: fxStretch 1.1s ease-in-out infinite; transform-origin: 50% 100%; }
+@keyframes fxStretch { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(1.08); } }
+.fx-squash { animation: fxSquash 0.8s ease-in-out infinite; transform-origin: 50% 100%; }
+@keyframes fxSquash { 0%, 100% { transform: scaleX(0.84) scaleY(1.16); } 50% { transform: scaleX(1.14) scaleY(0.9); } }
+.fx-bounce { animation: fxBounce 0.7s ease-in-out infinite; transform-origin: 50% 100%; }
+@keyframes fxBounce { 0%, 100% { transform: translateY(0) scaleY(1); } 30% { transform: translateY(-16px) scaleY(1.06); } 60% { transform: translateY(0) scaleY(0.96); } }
+.fx-float { animation: fxFloat 2s ease-in-out infinite; transform-origin: 50% 100%; }
+@keyframes fxFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
+.fx-shake { animation: fxShake 0.5s linear infinite; transform-origin: 50% 100%; }
+@keyframes fxShake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+.fx-spin { animation: fxSpin 1s linear infinite; transform-origin: 50% 50%; }
+@keyframes fxSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.fx-wiggle { animation: fxWiggle 0.8s ease-in-out infinite; transform-origin: 50% 100%; }
+@keyframes fxWiggle { 0%, 100% { transform: rotate(-12deg); } 50% { transform: rotate(12deg); } }
+.fx-pulse { animation: fxPulse 0.9s ease-in-out infinite; transform-origin: 50% 50%; }
+@keyframes fxPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+
+/* 翻转（朝左）时保留朝向镜像，叠加到各循环特效上 */
+.float-pet-img.flip.fx-stretch { animation: fxStretchFlip 1.1s ease-in-out infinite; }
+@keyframes fxStretchFlip { 0%, 100% { transform: scaleX(-1) scaleY(1); } 50% { transform: scaleX(-1) scaleY(1.08); } }
+.float-pet-img.flip.fx-squash { animation: fxSquashFlip 0.8s ease-in-out infinite; }
+@keyframes fxSquashFlip { 0%, 100% { transform: scaleX(-0.84) scaleY(1.16); } 50% { transform: scaleX(-1.14) scaleY(0.9); } }
+.float-pet-img.flip.fx-bounce { animation: fxBounceFlip 0.7s ease-in-out infinite; }
+@keyframes fxBounceFlip { 0%, 100% { transform: scaleX(-1) translateY(0) scaleY(1); } 30% { transform: scaleX(-1) translateY(-16px) scaleY(1.06); } 60% { transform: scaleX(-1) translateY(0) scaleY(0.96); } }
+.float-pet-img.flip.fx-float { animation: fxFloatFlip 2s ease-in-out infinite; }
+@keyframes fxFloatFlip { 0%, 100% { transform: scaleX(-1) translateY(0); } 50% { transform: scaleX(-1) translateY(-12px); } }
+.float-pet-img.flip.fx-shake { animation: fxShakeFlip 0.5s linear infinite; }
+@keyframes fxShakeFlip { 0%, 100% { transform: scaleX(-1) translateX(0); } 25% { transform: scaleX(-1) translateX(-5px); } 75% { transform: scaleX(-1) translateX(5px); } }
+.float-pet-img.flip.fx-spin { animation: fxSpinFlip 1s linear infinite; }
+@keyframes fxSpinFlip { from { transform: scaleX(-1) rotate(0deg); } to { transform: scaleX(-1) rotate(360deg); } }
+.float-pet-img.flip.fx-wiggle { animation: fxWiggleFlip 0.8s ease-in-out infinite; }
+@keyframes fxWiggleFlip { 0%, 100% { transform: scaleX(-1) rotate(-12deg); } 50% { transform: scaleX(-1) rotate(12deg); } }
+.float-pet-img.flip.fx-pulse { animation: fxPulseFlip 0.9s ease-in-out infinite; }
+@keyframes fxPulseFlip { 0%, 100% { transform: scaleX(-1) scale(1); } 50% { transform: scaleX(-1) scale(1.15); } }
+
 /* ===== 粒子特效 ===== */
 .particle {
     position: absolute;
@@ -229,10 +267,10 @@ body {
     }
 }
 
-/* ===== 对话气泡（默认隐藏，鼠标靠近时显示） ===== */
+/* ===== 对话气泡（默认隐藏，鼠标靠近时显示）===== */
 .float-bubble {
     position: absolute;
-    top: 6px;
+    bottom: calc(var(--float-pet-bottom, 4px) + var(--float-pet-size, 80px) + 6px + var(--float-bubble-offset, 0px));
     left: 50%;
     transform: translateX(-50%);
     background: rgba(255, 255, 255, 0.95);
@@ -243,7 +281,7 @@ body {
     font-size: 12px;
     color: #333;
     transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.3s ease;
-    min-width: 80px;
+    width: 200px; /* 与 updateWindowSize 中 bubbleWidth 保持一致 */
     line-height: 1.4;
     box-sizing: border-box;
     white-space: normal;
@@ -252,10 +290,12 @@ body {
     overflow-wrap: break-word;
     opacity: 0;
     pointer-events: none;
-    display: flex;
-    flex-direction: column;
+    /* 2×2 网格排布（4 个选项：两行两列） */
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    padding: 6px;
     overflow: hidden;
-    padding: 0;
 }
 
 .float-bubble.show {
@@ -278,19 +318,16 @@ body {
     transform: translateX(-50%) scale(1.02);
 }
 
-/* 气泡选项按钮 */
+/* 气泡选项按钮（2×2 网格中的单元格） */
 .bubble-option {
-    padding: 6px 14px;
+    padding: 9px 6px;
     font-size: 12px;
     cursor: pointer;
     transition: background 0.2s ease;
     white-space: nowrap;
     text-align: center;
-    line-height: 1.6;
-}
-
-.bubble-option:first-child {
-    border-bottom: 1px solid #eee;
+    line-height: 1.4;
+    border-radius: 8px;
 }
 
 .bubble-option:hover {
@@ -351,27 +388,56 @@ body {
     left: 0;
     width: 100%;
     height: 100%;
-    background: white;
-    border-radius: 0;       /* 原生标题栏不需要圆角 */
+    background: transparent;   /* 窗口透明，左侧立绘栏可直接看到桌面 */
+    border-radius: 0;       /* 无边框标题栏不需要圆角 */
     display: flex;
     flex-direction: row;
     overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+/* 聊天主区使用不透明背景，保证文字可读（立绘栏保持透明） */
+.chat-main {
+    background: #fff;
+}
+
+/* 自定义标题栏作为拖动区域（聊天窗口为无边框透明窗口） */
+.chat-header {
+    -webkit-app-region: drag;
+}
+.chat-header .chat-close-btn,
+.chat-header button {
+    -webkit-app-region: no-drag;
+}
+
 .chat-illust-panel {
-    width: 30%;
-    min-width: 100px;
-    max-width: 160px;
-    background: linear-gradient(135deg, #fce4ec, #f8bbd0);
+    width: var(--illust-width, 30%);
+    min-width: 80px;
+    max-width: 70%;
+    background: transparent; /* 立绘栏背景设为透明 */
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     padding: 10px 4px;
     position: relative;
-    transition: width 0.3s ease, min-width 0.3s ease;
     flex-shrink: 0;
+    overflow: hidden;
+}
+
+/* 立绘栏与聊天栏之间的分隔条：可拖拽调整两者比例 */
+.chat-illust-divider {
+    width: 5px;
+    cursor: col-resize;
+    background: #eee;
+    flex-shrink: 0;
+    user-select: none;
+    transition: background 0.2s;
+    z-index: 20;
+}
+.chat-illust-divider:hover,
+.chat-illust-divider.active {
+    background: #667eea;
 }
 
 .chat-illust-panel.hidden {
@@ -422,20 +488,6 @@ body {
     background: linear-gradient(145deg, #64b5f6, #2196f3);
     border-radius: 50%;
     box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-}
-
-.chat-illust-panel .illust-mood {
-    font-size: 12px;
-    color: #555;
-    margin-top: auto;
-    padding-bottom: 10px;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    white-space: nowrap;
-}
-
-.chat-illust-panel .illust-mood.show {
-    opacity: 1;
 }
 
 .illust-hide-btn {
@@ -1023,5 +1075,19 @@ input:checked + .slider:before {
 
 .voice-preview-btn:active {
     transform: scale(0.95);
+}
+
+/* ===== 设置窗口无边框拖拽（frame:false 后由头部提供拖拽区） ===== */
+body.settings-mode .sb-head,
+body.settings-mode .settings-header {
+    -webkit-app-region: drag;
+}
+body.settings-mode .sb-close,
+body.settings-mode .settings-close-btn,
+body.settings-mode input,
+body.settings-mode select,
+body.settings-mode textarea,
+body.settings-mode button {
+    -webkit-app-region: no-drag;
 }
 

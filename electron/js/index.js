@@ -3,9 +3,6 @@ const petImg = document.getElementById('petImg');
 const speech = document.getElementById('speech');
 const statusHint = document.getElementById('statusHint');
 const roomIndicator = document.getElementById('roomIndicator');
-const settingsBtn = document.getElementById('settingsBtn');
-const settingsPanel = document.getElementById('settingsPanel');
-const closeSettings = document.getElementById('closeSettings');
 const apiKeyInput = document.getElementById('apiKeyInput');
 const apiUrlInput = document.getElementById('apiUrlInput');
 const aiDecideToggle = document.getElementById('aiDecideToggle');
@@ -76,7 +73,6 @@ const cookieSpawnToggle = document.getElementById('cookieSpawnToggle');
 const floatShowIllustToggle = document.getElementById('floatShowIllustToggle');
 const furnitureSizeSlider = document.getElementById('furnitureSizeSlider');
 const furnitureSizeValue = document.getElementById('furnitureSizeValue');
-const keepRunningToggle = document.getElementById('keepRunningToggle');
 const windowOpacitySlider = document.getElementById('windowOpacitySlider');
 const windowOpacityValue = document.getElementById('windowOpacityValue');
 const wallOpacitySlider = document.getElementById('wallOpacitySlider');
@@ -99,14 +95,13 @@ let config = {
     furnitureSize: 3.8,
     floatMoveMode: 'free',
     bounceWindows: false,
-    keepRunningOnClose: false,
     floatShowIllust: true,
     gridCellSize: 0,
     gridViewMode: 'diamond',
     windowOpacity: 1,
     wallOpacity: 1,
     floorOpacity: 1,
-    aiPrompt: '你是一个可爱的桌宠小鲸鱼，性格活泼可爱。请用简短可爱的语气回复，不要超过30字。\n\n【心情标记格式】\n在回复末尾，你必须使用以下格式标记你当前的心情：<MOOD:心情>\n可选心情：鼓励、害羞、好奇、惊讶、难过、撒娇、生气、无语、兴奋\n选择依据：根据你当前的状态和对话内容选择最贴切的心情，而不是随机选择。\n例如：<MOOD:害羞>\n注意：心情标记只出现在回复末尾，不要出现在正文对话中。\n\n【行为指令格式】\n如果用户要求你去某个房间或做某件具体的事，请在回复末尾使用以下格式输出指令：<CMD:指令>\n可用指令：去客厅、去卧室、去厨房、去卫生间、去阳台、吃饭、睡觉、洗澡、上厕所、看电视\n例如：<CMD:去卧室>\n注意：指令标记只出现在回复末尾，不要出现在正文对话中。',
+    aiPrompt: '你是一个可爱的桌宠小鲸鱼，性格活泼可爱。请用简短可爱的语气回复，不要超过30字。\n\n【心情标记格式】\n在回复末尾，你必须使用以下格式标记你当前的心情：<MOOD:心情>\n可选心情：鼓励、害羞、好奇、惊讶、难过、撒娇、生气、无语、兴奋\n选择依据：根据你当前的状态和对话内容选择最贴切的心情，而不是随机选择。\n例如：<MOOD:害羞>\n注意：心情标记只出现在回复末尾，不要出现在正文对话中。\n\n【行为指令格式】\n如果用户要求你去某个房间或做某件具体的事，请在回复末尾使用以下格式输出指令：<CMD:指令>\n可用指令：去客厅、去卧室、去厨房、去卫生间、去阳台、吃饭、睡觉、洗澡、上厕所、看电视\n例如：<CMD:去卧室>\n注意：指令标记只出现在回复末尾，不要出现在正文对话中。\n\n【好感度标记格式】\n在回复末尾，你还必须使用以下格式标记你当前对用户的好感度数值（0-100，取整数）：<AFFECTION:数值>\n数值参考：你的当前好感度会在对话开始前由系统告知。若未告知，请合理推断（一般随互动增多而上升）。\n例如：<AFFECTION:72>',
     enableMemory: false,
     behaviorLogMax: 50,
     cookieSize: 40,
@@ -114,7 +109,8 @@ let config = {
     behaviorKeepProb: 60,
     zhipuApiKey: '',
     multimodalEnabled: false,
-    costSavingEnabled: false,
+    multimodalProvider: 'deepseek',
+    zhipuApiUrl: '',
     selectedVoice: 'default',
     voiceEnabled: true,
     voiceAutoSend: true,
@@ -165,10 +161,9 @@ let startX = 0;
 let startY = 0;
 
 let isWindowMinimized = false;
-let keepRunningOnClose = false;
 
 function shouldPausePetActivity() {
-    return chatPanel.classList.contains('show') || (isWindowMinimized && !keepRunningOnClose);
+    return chatPanel.classList.contains('show') || isWindowMinimized;
 }
 
 let isMoving = false;
@@ -358,12 +353,23 @@ const moodEmojis = {
 
 const moodList = Object.keys(moodEmojis);
 
-function loadConfig() {
+async function loadConfig() {
     const saved = localStorage.getItem('petConfig');
     if (saved) {
         try {
             config = { ...config, ...JSON.parse(saved) };
         } catch (e) {}
+    }
+    // 先从主进程拉取权威配置（float/index/设置窗口共用同一套），
+    // 合并完成后再 applyConfig。applyConfig 会把 floatPetSize / 移动模式 / 是否生成饼干
+    // 以及 API Key 等同步到浮窗并刷新 UI；若在此前就 apply，会把这些设置回退成
+    // "默认值 + 本地缓存"（往往是旧的/空的），导致一打开 index 就把 float 的设置改回默认。
+    if (window.electronAPI && window.electronAPI.getConfig) {
+        const unified = await window.electronAPI.getConfig().catch(() => null);
+        if (unified && typeof unified === 'object') {
+            config = { ...config, ...unified };
+            localStorage.setItem('petConfig', JSON.stringify(config));
+        }
     }
     applyConfig();
 }
@@ -371,6 +377,10 @@ function loadConfig() {
 function saveConfig() {
     localStorage.setItem('petConfig', JSON.stringify(config));
     applyConfig();
+    // 同步到主进程统一配置中枢并广播给其它窗口（float/设置窗口共用同一套设置）
+    if (window.electronAPI && window.electronAPI.syncConfig) {
+        window.electronAPI.syncConfig(config);
+    }
 }
 
 function applyConfig() {
@@ -379,7 +389,6 @@ function applyConfig() {
     aiDecideToggle.checked = config.aiDecide;
     buttonSizeSlider.value = config.buttonSize;
     portraitToggle.checked = config.portraitAuto;
-    keepRunningToggle.checked = config.keepRunningOnClose;
     devModeToggle.checked = config.devMode;
     aiPromptInput.value = config.aiPrompt;
     memoryToggle.checked = config.enableMemory;
@@ -466,10 +475,9 @@ function applyConfig() {
         if (voiceVolumeValue) voiceVolumeValue.textContent = Math.round((config.voiceVolume != null ? config.voiceVolume : 1) * 100) + '%';
     }
 
-    // 同步透明度到主进程（实际设置 Electron 窗口透明度）
-    if (window.electronAPI && window.electronAPI.setWindowOpacity) {
-        window.electronAPI.setWindowOpacity(config.windowOpacity != null ? config.windowOpacity : 1);
-    }
+    // 透明度应用由主进程统一负责（config-sync / sync-home-settings 中 windowOpacity
+    // 变化时 setOpacity）。此处不再写 IPC：applyConfig 是被动刷新路径，只允许纯 UI 更新，
+    // 避免"收到广播 -> applyConfig -> 又写主进程"的副作用与回声。
 
     updateButtonSize(config.buttonSize);
     applySizeSettings();
@@ -480,28 +488,15 @@ function applyConfig() {
     checkPortraitMode();
     toggleDevMode(config.devMode);
     restorePersonaTags();
-    // 同步 Electron 主进程设置
-    if (window.electronAPI && window.electronAPI.setKeepRunningOnClose) {
-        window.electronAPI.setKeepRunningOnClose(config.keepRunningOnClose);
-    }
-    // 同步本地变量与配置
-    keepRunningOnClose = config.keepRunningOnClose;
-
     // 多模态配置
     const multimodalToggle = document.getElementById('multimodalToggle');
+    const multimodalProviderSelect = document.getElementById('multimodalProviderSelect');
     const zhipuApiKeyInput = document.getElementById('zhipuApiKeyInput');
-    const costSavingToggle = document.getElementById('costSavingToggle');
-    const costSavingItem = document.getElementById('costSavingItem');
+    const zhipuApiUrlInput = document.getElementById('zhipuApiUrlInput');
     if (multimodalToggle) multimodalToggle.checked = config.multimodalEnabled;
+    if (multimodalProviderSelect) multimodalProviderSelect.value = config.multimodalProvider || 'deepseek';
     if (zhipuApiKeyInput) zhipuApiKeyInput.value = config.zhipuApiKey || '';
-    if (costSavingToggle) costSavingToggle.checked = config.costSavingEnabled;
-    if (costSavingItem) {
-        costSavingItem.style.display = config.zhipuApiKey ? 'flex' : 'none';
-    }
-    const costSavingHint = document.getElementById('costSavingHint');
-    if (costSavingHint) {
-        costSavingHint.style.display = (config.costSavingEnabled && !config.zhipuApiKey) ? 'block' : 'none';
-    }
+    if (zhipuApiUrlInput) zhipuApiUrlInput.value = config.zhipuApiUrl || '';
 }
 
 // 应用大小设置：主窗口桌宠、家具 emoji 使用 CSS 变量；小窗口桌宠通过 IPC 通知浮窗
@@ -526,19 +521,11 @@ function applySizeSettings() {
         }
         updatePetPosition();
     }, 50);
-    // 通知 electron 浮窗更新桌宠大小
-    if (window.electronAPI && window.electronAPI.setFloatPetSize) {
-        window.electronAPI.setFloatPetSize(config.floatPetSize);
-    }
-    if (window.electronAPI && window.electronAPI.setFloatMoveMode) {
-        window.electronAPI.setFloatMoveMode(config.floatMoveMode || 'free');
-    }
-    if (window.electronAPI && window.electronAPI.setFloatBounceWindows) {
-        window.electronAPI.setFloatBounceWindows(config.bounceWindows || false);
-    }
-    if (window.electronAPI && window.electronAPI.setCookieSpawnEnabled) {
-        window.electronAPI.setCookieSpawnEnabled(config.cookieSpawnEnabled !== false);
-    }
+    // 浮窗相关字段（大小/移动模式/碰撞/生成饼干）不再由被动刷新路径写回：
+    // 这些值随用户"保存设置"（applyStatsBtn -> saveConfig -> config-sync 全量）进入主进程，
+    // 由主进程 config-sync 统一同步运行状态并下发浮窗；applyConfig 只负责刷新本窗口 UI。
+    // 此前 applySizeSettings 在此处无条件 set-float-* IPC，会在"收到 config-updated 广播 ->
+    // applyConfig -> 再写回"的链路上形成回声循环，并用兜底默认值覆盖其它窗口的设置。
 }
 
 function restorePersonaTags() {
@@ -591,24 +578,10 @@ function updateButtonSize(size) {
 }
 
 function checkPortraitMode() {
-    if (!config.portraitAuto) {
-        document.body.classList.remove('portrait-mode');
-        config.portraitMode = false;
-        return;
-    }
-    
-    const isPortrait = window.innerHeight > window.innerWidth;
-    config.portraitMode = isPortrait;
-    
-    if (isPortrait) {
-        document.body.classList.add('portrait-mode');
-    } else {
-        document.body.classList.remove('portrait-mode');
-    }
-    
-    setTimeout(() => {
-        updateGridLayout();
-    }, 100);
+    // 竖屏适配功能已移除：不再根据窗口宽高比切换竖屏布局，始终使用横屏布局
+    document.body.classList.remove('portrait-mode');
+    config.portraitMode = false;
+    return;
 }
 
 function toggleDevMode(enabled) {
@@ -623,7 +596,7 @@ function toggleDevMode(enabled) {
         if (programSection) programSection.style.display = 'block';
         if (logMaxSection) logMaxSection.style.display = 'flex';
         updateStatsEditValues();
-        if (!config.apiKey) {
+        if (!aiHasKey()) {
             memoryHint.style.display = 'block';
         } else {
             memoryHint.style.display = 'none';
@@ -701,7 +674,7 @@ function updateMoveSpeed() {
     pet.style.setProperty('--hop-height', hopHeight + 'px');
 }
 async function init() {
-    loadConfig();
+    await loadConfig();
     loadGrid();
     await loadMemory();
     loadStats();
@@ -721,7 +694,6 @@ async function init() {
     if (window.electronAPI) {
         if (window.electronAPI.setZhipuKey) window.electronAPI.setZhipuKey(config.zhipuApiKey);
         if (window.electronAPI.setMultimodalEnabled) window.electronAPI.setMultimodalEnabled(config.multimodalEnabled);
-        if (window.electronAPI.setCostSaving) window.electronAPI.setCostSaving(config.costSavingEnabled);
     }
 
     // 将桌宠放到客厅的一个地板格子上（等轴测坐标）
@@ -746,6 +718,7 @@ async function init() {
     updateCurrentRoom();
     updateStatsDisplay();
     updateActivityText('在客厅玩耍~');
+    showPet(); // 初始阶段立即显示桌宠，避免"点击后才出现"
 
     // 初始化网格编辑器（在 grid-editor.js 中定义）
     if (typeof initGridEditor === 'function') {
@@ -1119,15 +1092,20 @@ function switchIllust(mood) {
     const emoji = moodEmojis[mood] || '';
     illustMood.textContent = emoji + ' ' + mood;
 
+    // 恢复被 onerror 内联处理器隐藏的立绘（否则后续切换永远不可见）
+    illustImg.style.display = '';
+
     // 直接切换图片，无淡出淡入
     const moodImgPath = imgPath('mood_' + mood + '.png');
     const tempImg = new Image();
     tempImg.onload = function() {
+        illustImg.style.display = '';
         illustImg.src = moodImgPath;
         illustImg.classList.add('show');
         illustMood.classList.add('show');
     };
     tempImg.onerror = function() {
+        illustImg.style.display = '';
         illustImg.src = imgPath('pet.png');
         illustImg.classList.add('show');
         illustMood.classList.add('show');
@@ -1146,18 +1124,41 @@ function hideIllust() {
     illustMood.classList.remove('show');
 }
 
+// 统一 AI 提供商凭据：API 设置与多模态设置已合并，所有 AI 调用都根据
+// 当前选中的提供商（DeepSeek / 智谱）返回对应的请求地址、API Key 与模型名。
+function aiCredentials() {
+    const provider = config.multimodalProvider || 'deepseek';
+    if (provider === 'zhipu') {
+        return {
+            apiUrl: config.zhipuApiUrl || 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+            apiKey: config.zhipuApiKey || '',
+            model: 'glm-4-flash'
+        };
+    }
+    return {
+        apiUrl: config.apiUrl || 'https://api.deepseek.com/v1/chat/completions',
+        apiKey: config.apiKey || '',
+        model: 'deepseek-v4-flash'
+    };
+}
+// 当前选中的 AI 提供商是否已配置可用 Key
+function aiHasKey() {
+    return !!aiCredentials().apiKey;
+}
+
 async function askAiToSummarize(text) {
-    if (!config.apiKey) return text;
-    
+    if (!aiHasKey()) return text;
+    const c = aiCredentials();
+
     try {
-        const response = await fetch(config.apiUrl, {
+        const response = await fetch(c.apiUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${config.apiKey}`
+                'Authorization': `Bearer ${c.apiKey}`
             },
             body: JSON.stringify({
-                model: 'deepseek-chat',
+                model: c.model,
                 messages: [
                     {
                         role: 'system',
@@ -2067,7 +2068,7 @@ function decideDestination() {
     if (Date.now() - lastDragTime < DRAG_COOLDOWN_MS) {
         return;
     }
-    if (config.aiDecide && config.apiKey) {
+    if (config.aiDecide && aiHasKey()) {
         aiDecideDestination();
         return;
     }
@@ -2144,6 +2145,7 @@ function decideDestination() {
 }
 
 async function aiDecideDestination() {
+    const c = aiCredentials();
     try {
         const currentRoom = updateCurrentRoom();
         const statsStr = Object.entries(stats)
@@ -2162,14 +2164,14 @@ async function aiDecideDestination() {
 
 请根据最需要解决的需求，选择一个最适合去的房间。只返回房间名称（客厅/卧室/厨房/卫生间/阳台）`;
 
-        const response = await fetch(config.apiUrl, {
+        const response = await fetch(c.apiUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${config.apiKey}`
+                'Authorization': `Bearer ${c.apiKey}`
             },
             body: JSON.stringify({
-                model: 'deepseek-chat',
+                model: c.model,
                 messages: [
                     {
                         role: 'system',
@@ -2436,10 +2438,11 @@ async function buildContextStr() {
 
 // 对话开始时，AI根据自身状态决定心情（用于立绘）
 async function decideMoodByState() {
-    if (!config.apiKey) {
+    if (!aiHasKey()) {
         switchIllust(null);
         return;
     }
+    const c = aiCredentials();
     try {
         const currentRoom = updateCurrentRoom();
         const statsStr = Object.entries(stats)
@@ -2448,14 +2451,14 @@ async function decideMoodByState() {
         const ctxStr = await buildContextStr();
         const prompt = `你现在在${ROOM_TYPES[currentRoom]?.name || '房间'}里。当前状态：${statsStr}${ctxStr}\n请根据你当前的状态，选择一个最贴切的心情。只返回心情名称，可选：鼓励、害羞、好奇、惊讶、难过、撒娇、生气、无语、兴奋`;
 
-        const response = await fetch(config.apiUrl, {
+        const response = await fetch(c.apiUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${config.apiKey}`
+                'Authorization': `Bearer ${c.apiKey}`
             },
             body: JSON.stringify({
-                model: 'deepseek-chat',
+                model: c.model,
                 messages: [
                     { role: 'system', content: '你是一个桌宠，根据自身状态选择心情。只返回心情名称。' },
                     { role: 'user', content: prompt }
@@ -2475,12 +2478,12 @@ async function decideMoodByState() {
 // 桌宠主动开始话题（点击无聊气泡时调用）
 async function petStartConversation() {
     chatPanel.classList.add('show');
-    settingsPanel.classList.remove('show');
     stopMoving();
     hidePersistentSpeech();
     decideMoodByState();
 
-    if (config.apiKey) {
+    if (aiHasKey()) {
+        const c = aiCredentials();
         try {
             addChatMessage('（桌宠想和你说话...）', false);
             const currentRoom = updateCurrentRoom();
@@ -2499,14 +2502,14 @@ async function petStartConversation() {
 
 你现在有点无聊，想主动找主人聊天。请主动开启一个话题，话题应与你当前的状态、时间或记忆有关。`;
 
-            const response = await fetch(config.apiUrl, {
+            const response = await fetch(c.apiUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${config.apiKey}`
+                    'Authorization': `Bearer ${c.apiKey}`
                 },
                 body: JSON.stringify({
-                    model: 'deepseek-chat',
+                    model: c.model,
                     messages: [
                         { role: 'system', content: systemPrompt },
                         { role: 'user', content: '请主动开启话题和我聊天' }
@@ -2556,7 +2559,7 @@ async function sendChatMessage(text) {
     addChatMessage(text, true);
     lastUserMessage = text;
 
-    if (config.apiKey) {
+    if (aiHasKey()) {
         try {
             const currentRoom = updateCurrentRoom();
             const statsStr = Object.entries(stats)
@@ -2571,9 +2574,11 @@ async function sendChatMessage(text) {
             const behaviorStr = getBehaviorLogStr();
             const ctxStr = await buildContextStr();
 
-            // ===== 屏幕感知（多模态） =====
+            // ===== 屏幕感知（多模态，按提供商判断是否有可用 Key） =====
             let screenContext = '';
-            if (config.multimodalEnabled && config.zhipuApiKey) {
+            const mmProvider = config.multimodalProvider || 'deepseek';
+            const mmHasKey = mmProvider === 'zhipu' ? !!config.zhipuApiKey : !!config.apiKey;
+            if (config.multimodalEnabled && mmHasKey) {
                 try {
                     const recent = chatHistory.slice(-15).map(m => 
                         `${m.role === 'user' ? '用户' : '桌宠'}: ${m.content}`
@@ -2615,17 +2620,9 @@ async function sendChatMessage(text) {
                 content: text
             });
 
-            // ===== AI 请求路由（节省成本模式） =====
-            let apiUrl, apiKey, model;
-            if (config.costSavingEnabled && config.zhipuApiKey) {
-                apiUrl = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
-                apiKey = config.zhipuApiKey;
-                model = 'glm-4-flash';
-            } else {
-                apiUrl = config.apiUrl;
-                apiKey = config.apiKey;
-                model = 'deepseek-chat';
-            }
+            // AI 请求路由统一走当前选中的提供商（DeepSeek / 智谱）
+            const _ai = aiCredentials();
+            let apiUrl = _ai.apiUrl, apiKey = _ai.apiKey, model = _ai.model;
 
             const response = await fetch(apiUrl, {
                 method: 'POST',
@@ -2710,9 +2707,10 @@ let isSummarizing = false; // 防重入锁
 async function summarizeMemoryOnChatClose() {
     // 防重入锁：如果正在总结中，直接返回
     if (isSummarizing) return;
-    if (!config.apiKey || !config.enableMemory || chatHistory.length === 0) return;
+    if (!aiHasKey() || !config.enableMemory || chatHistory.length === 0) return;
 
     isSummarizing = true;
+    const c = aiCredentials();
     try {
         // 1. 复制 chatHistory 并立即清空，防止后续操作触发重复总结
         const historySnapshot = chatHistory.slice();
@@ -2728,14 +2726,14 @@ async function summarizeMemoryOnChatClose() {
             ? '\n\n已保存的记忆（请勿重复）：\n' + memoryItems.map((m, i) => `${i + 1}. ${m.text}`).join('\n')
             : '';
 
-        const response = await fetch(config.apiUrl, {
+        const response = await fetch(c.apiUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${config.apiKey}`
+                'Authorization': `Bearer ${c.apiKey}`
             },
             body: JSON.stringify({
-                model: 'deepseek-chat',
+                model: c.model,
                 messages: [
                     {
                         role: 'system',
@@ -2790,6 +2788,8 @@ function addChatMessage(text, isUser) {
     safeText = safeText.replace(/\[SHORT_MEMORY:\s*[^\]]+\]/g, '');
     safeText = safeText.replace(/<MOOD:[^>]+>/g, '');
     safeText = safeText.replace(/<CMD:[^>]+>/g, '');
+    safeText = safeText.replace(/<EFFECT:[^>]+>/g, '');
+    safeText = safeText.replace(/<STATE:[^>]+>/g, '');
     // 移除零宽字符和不可见字符
     safeText = safeText.replace(/[\u200B-\u200F\uFEFF\u00AD\u2060\u180E\uFE00-\uFE0F\u2000-\u200A\u202F\u205F\u3000]+/g, ' ');
     // 移除 emoji variation selectors
@@ -3106,7 +3106,6 @@ if (chatBtn) {
             closeChatPanel();
         } else {
             chatPanel.classList.add('show');
-            settingsPanel.classList.remove('show');
             stopMoving();
             decideMoodByState();
         }
@@ -3129,7 +3128,6 @@ const openFloatBtn = document.getElementById('openFloatBtn');
 if (openFloatBtn) {
     openFloatBtn.addEventListener('click', () => {
         chatPanel.classList.add('show');
-        settingsPanel.classList.remove('show');
         stopMoving();
         decideMoodByState();
     });
@@ -3196,38 +3194,36 @@ if (saveChatBtn) {
     });
 }
 
-// 监听配置更新（主进程广播）
+// 监听配置更新（主进程广播，float/设置窗口改动时触发）→ 全量合并并重新应用 UI
 if (window.electronAPI && window.electronAPI.onConfigUpdated) {
     window.electronAPI.onConfigUpdated((data) => {
         if (data) {
-            config.zhipuApiKey = data.zhipuApiKey || '';
-            config.multimodalEnabled = data.multimodalEnabled || false;
-            config.costSavingEnabled = data.costSavingEnabled || false;
-            // 同步 UI 控件
-            const multimodalToggle = document.getElementById('multimodalToggle');
-            const zhipuApiKeyInput = document.getElementById('zhipuApiKeyInput');
-            const costSavingToggle = document.getElementById('costSavingToggle');
-            if (multimodalToggle) multimodalToggle.checked = config.multimodalEnabled;
-            if (zhipuApiKeyInput) zhipuApiKeyInput.value = config.zhipuApiKey;
-            if (costSavingToggle) costSavingToggle.checked = config.costSavingEnabled;
-            if (data.stickerPack !== undefined) {
-                config.stickerPack = data.stickerPack;
-                window._stickerPack = data.stickerPack;
-            }
-            // 持久化到 localStorage
+            config = { ...config, ...data };
+            if (data.stickerPack !== undefined) window._stickerPack = data.stickerPack;
+            // 持久化到 localStorage，避免刷新后丢失
             localStorage.setItem('petConfig', JSON.stringify(config));
+            applyConfig();
+            console.log('[index] 配置已更新:', data);
         }
     });
 }
 
-settingsBtn.addEventListener('click', () => {
-    settingsPanel.classList.toggle('show');
-    chatPanel.classList.remove('show');
-});
-
-closeSettings.addEventListener('click', () => {
-    settingsPanel.classList.remove('show');
-});
+// 监听家里(主窗口)专属设置更新（统一设置窗口改动时由主进程广播）→ 实时重新应用
+if (window.electronAPI && window.electronAPI.onHomeSettingsUpdated) {
+    window.electronAPI.onHomeSettingsUpdated((data) => {
+        if (!data) return;
+        if (data.windowOpacity !== undefined) config.windowOpacity = data.windowOpacity;
+        if (data.wallOpacity !== undefined) config.wallOpacity = data.wallOpacity;
+        if (data.floorOpacity !== undefined) config.floorOpacity = data.floorOpacity;
+        if (data.mainPetSize !== undefined) config.mainPetSize = data.mainPetSize;
+        if (data.furnitureSize !== undefined) config.furnitureSize = data.furnitureSize;
+        if (data.buttonSize !== undefined) config.buttonSize = data.buttonSize;
+        if (data.portraitAuto !== undefined) config.portraitAuto = data.portraitAuto;
+        if (data.companionWidth !== undefined) config.companionWidth = data.companionWidth;
+        localStorage.setItem('petConfig', JSON.stringify(config));
+        applyConfig();
+    });
+}
 
 buttonSizeSlider.addEventListener('input', (e) => {
     config.buttonSize = parseInt(e.target.value);
@@ -3319,14 +3315,6 @@ furnitureSizeSlider.addEventListener('input', (e) => {
     applySizeSettings();
 });
 
-keepRunningToggle.addEventListener('change', (e) => {
-    config.keepRunningOnClose = e.target.checked;
-    keepRunningOnClose = e.target.checked;
-    if (window.electronAPI && window.electronAPI.setKeepRunningOnClose) {
-        window.electronAPI.setKeepRunningOnClose(config.keepRunningOnClose);
-    }
-});
-
 devModeToggle.addEventListener('change', (e) => {
     toggleDevMode(e.target.checked);
     // 同步开发者模式状态到浮窗
@@ -3369,34 +3357,24 @@ if (floorOpacitySlider) {
 // ===== 多模态事件监听 =====
 (function initMultimodalUI() {
     const multimodalToggle = document.getElementById('multimodalToggle');
-    const zhipuApiKeyInput = document.getElementById('zhipuApiKeyInput');
-    const costSavingToggle = document.getElementById('costSavingToggle');
-    const costSavingItem = document.getElementById('costSavingItem');
-    const costSavingHint = document.getElementById('costSavingHint');
+    const multimodalProviderSelect = document.getElementById('multimodalProviderSelect');
+    const zhipuApiUrlInput = document.getElementById('zhipuApiUrlInput');
 
-    if (zhipuApiKeyInput) {
-        zhipuApiKeyInput.addEventListener('input', () => {
-            const hasKey = !!zhipuApiKeyInput.value.trim();
-            if (costSavingItem) {
-                costSavingItem.style.display = hasKey ? 'flex' : 'none';
+    if (multimodalProviderSelect) {
+        multimodalProviderSelect.addEventListener('change', () => {
+            config.multimodalProvider = multimodalProviderSelect.value;
+            if (config.multimodalProvider === 'zhipu' && !config.zhipuApiUrl) {
+                config.zhipuApiUrl = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+            } else if (config.multimodalProvider === 'deepseek' && !config.apiUrl) {
+                config.apiUrl = 'https://api.deepseek.com/v1/chat/completions';
             }
-            if (!hasKey && costSavingToggle) {
-                costSavingToggle.checked = false;
-            }
-            if (costSavingHint) {
-                costSavingHint.style.display = (costSavingToggle && costSavingToggle.checked && !hasKey) ? 'block' : 'none';
-            }
+            saveConfig();
         });
     }
-
-    if (costSavingToggle) {
-        costSavingToggle.addEventListener('change', () => {
-            const hasKey = zhipuApiKeyInput ? !!zhipuApiKeyInput.value.trim() : false;
-            if (costSavingToggle.checked && !hasKey) {
-                if (costSavingHint) costSavingHint.style.display = 'block';
-            } else {
-                if (costSavingHint) costSavingHint.style.display = 'none';
-            }
+    if (zhipuApiUrlInput) {
+        zhipuApiUrlInput.addEventListener('change', () => {
+            config.zhipuApiUrl = zhipuApiUrlInput.value.trim() || 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+            saveConfig();
         });
     }
 })();
@@ -3410,7 +3388,6 @@ applyStatsBtn.addEventListener('click', () => {
     config.aiDecide = aiDecideToggle.checked;
     config.buttonSize = parseInt(buttonSizeSlider.value);
     config.portraitAuto = portraitToggle.checked;
-    config.keepRunningOnClose = keepRunningToggle.checked;
     config.devMode = devModeToggle.checked;
     config.mainPetSize = parseFloat(mainPetSizeSlider.value);
     config.floatPetSize = parseInt(floatPetSizeSlider.value);
@@ -3428,11 +3405,13 @@ applyStatsBtn.addEventListener('click', () => {
     config.floorOpacity = floorOpacitySlider ? parseInt(floorOpacitySlider.value) / 100 : 1;
     // 多模态配置
     const multimodalToggle = document.getElementById('multimodalToggle');
+    const multimodalProviderSelect = document.getElementById('multimodalProviderSelect');
     const zhipuApiKeyInput = document.getElementById('zhipuApiKeyInput');
-    const costSavingToggle = document.getElementById('costSavingToggle');
+    const zhipuApiUrlInput = document.getElementById('zhipuApiUrlInput');
     config.multimodalEnabled = multimodalToggle ? multimodalToggle.checked : false;
+    config.multimodalProvider = multimodalProviderSelect ? multimodalProviderSelect.value : 'deepseek';
     config.zhipuApiKey = zhipuApiKeyInput ? zhipuApiKeyInput.value.trim() : '';
-    config.costSavingEnabled = costSavingToggle ? costSavingToggle.checked : false;
+    config.zhipuApiUrl = zhipuApiUrlInput ? zhipuApiUrlInput.value.trim() : '';
     // 陪伴模式设置
     const companionWidthSlider = document.getElementById('companionWidthSlider');
     const companionHeightSlider = document.getElementById('companionHeightSlider');
@@ -3456,8 +3435,6 @@ applyStatsBtn.addEventListener('click', () => {
     if (window.electronAPI) {
         if (window.electronAPI.setZhipuKey) window.electronAPI.setZhipuKey(config.zhipuApiKey);
         if (window.electronAPI.setMultimodalEnabled) window.electronAPI.setMultimodalEnabled(config.multimodalEnabled);
-        if (window.electronAPI.setCostSaving) window.electronAPI.setCostSaving(config.costSavingEnabled);
-        if (window.electronAPI.setKeepRunningOnClose) window.electronAPI.setKeepRunningOnClose(config.keepRunningOnClose);
         window.electronAPI.send('set-dev-mode', config.devMode);
         window.electronAPI.send('set-behavior-keep-prob', config.behaviorKeepProb);
         window.electronAPI.send('set-ai-prompt', config.aiPrompt);
@@ -4198,20 +4175,12 @@ if (closeBtn && window.electronAPI && window.electronAPI.closeWindow) {
     });
 }
 
-// 设置面板点击空白处关闭
-document.addEventListener('click', (e) => {
-    if (settingsPanel.classList.contains('show')) {
-        if (!settingsPanel.contains(e.target) && e.target !== settingsBtn) {
-            settingsPanel.classList.remove('show');
-        }
-    }
-});
+// 设置面板已移除，点击空白处关闭逻辑不再需要
 
 // Electron IPC 监听：显示聊天面板
 if (window.electronAPI) {
     window.electronAPI.onShowChatPanel(() => {
         chatPanel.classList.add('show');
-        settingsPanel.classList.remove('show');
         stopMoving();
         decideMoodByState();
     });
@@ -4220,21 +4189,12 @@ if (window.electronAPI) {
     window.electronAPI.on('trigger-memory-summary', () => {
         summarizeMemoryOnChatClose();
     });
-    window.electronAPI.onSyncFloatSize && window.electronAPI.onSyncFloatSize((size) => {
-        config.floatPetSize = size;
-        floatPetSizeSlider.value = size;
-        floatPetSizeValue.textContent = size;
-        saveConfig();
-    });
+    // （sync-float-size 通路已移除：浮窗大小随 config-updated 广播 -> applyConfig 自动刷新滑杆）
 
-    // 监听窗口最小化事件（附带 keepRunningOnClose 设置）
-    window.electronAPI.onWindowMinimized && window.electronAPI.onWindowMinimized((keepRunning) => {
+    // 监听窗口最小化事件
+    window.electronAPI.onWindowMinimized && window.electronAPI.onWindowMinimized(() => {
         isWindowMinimized = true;
-        keepRunningOnClose = !!keepRunning;
-
-        if (!keepRunningOnClose) {
-            stopMoving();
-        }
+        stopMoving();
     });
 
     // 监听窗口恢复事件（合并 restoreGracePeriod 设置与布局刷新）
@@ -4347,9 +4307,9 @@ if (window.electronAPI) {
             voiceSelect.innerHTML = '<option value="default">🔄 自动选择（推荐）</option>';
             voices.forEach(v => {
                 const opt = document.createElement('option');
-                opt.value = v;
-                opt.textContent = v;
-                if (v === savedVoice) opt.selected = true;
+                opt.value = typeof v === 'object' ? v.id : v;
+                opt.textContent = typeof v === 'object' ? (v.id + ' · ' + v.desc) : v;
+                if (opt.value === savedVoice) opt.selected = true;
                 voiceSelect.appendChild(opt);
             });
         }).catch(err => {
@@ -4490,7 +4450,6 @@ const quickChatBtn = document.getElementById('quickChatBtn');
 if (quickChatBtn) {
     quickChatBtn.addEventListener('click', () => {
         chatPanel.classList.add('show');
-        settingsPanel.classList.remove('show');
         stopMoving();
         decideMoodByState();
     });
@@ -4593,14 +4552,13 @@ async function speakText(text) {
     function refreshAllImages() {
         // 主窗口桌宠
         petImg.src = imgPath('pet.png');
-        // 立绘
+        // 立绘：恢复显示并重置为当前贴图包的 pet 立绘
+        illustImg.style.display = '';
         illustImg.src = imgPath('pet.png');
+        illustImg.classList.add('show');
+        illustMood.classList.add('show');
         // 刷新家具图像（重新渲染网格）
         if (typeof renderGrid === 'function') renderGrid();
-        // 刷新当前心情立绘
-        if (typeof currentMood !== 'undefined') {
-            illustImg.src = imgPath('mood_' + currentMood + '.png');
-        }
     }
 
     loadStickerPacks();

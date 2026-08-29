@@ -5,6 +5,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 恢复主窗口
     restoreMainWindow: () => ipcRenderer.send('restore-main-window'),
 
+    // 开机自启动（设置面板"开机自启"开关）
+    setLoginItem: (enabled) => ipcRenderer.send('set-login-item', enabled),
+
+    // 浮窗"回家"按钮：唤起主窗口 index.html（次要窗口）
+    showIndexWindow: () => ipcRenderer.send('show-index-window'),
+
+    // 打开设置面板（独立窗口，加载 float.html?mode=settings）
+    openSettings: () => ipcRenderer.send('float-open-settings'),
+
+    // 关闭设置面板
+    closeSettings: () => ipcRenderer.send('settings-close'),
+
+    // 退出整个应用（设置面板"退出应用"按钮）
+    quitApp: () => ipcRenderer.send('app-quit'),
+
     // 打开聊天对话框
     openChatDialog: () => ipcRenderer.send('open-chat-dialog'),
 
@@ -16,9 +31,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // 设置浮窗桌宠大小
     setFloatPetSize: (size) => ipcRenderer.send('set-float-pet-size', size),
-
-    // 设置关闭窗口时是否保持运行
-    setKeepRunningOnClose: (enabled) => ipcRenderer.send('set-keep-running-on-close', enabled),
 
     // 窗口控制
     minimizeWindow: () => ipcRenderer.send('window-minimize'),
@@ -76,8 +88,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 浮窗把聊天历史发送给主窗口（用于恢复主窗口聊天界面时继承对话）
     syncChatHistory: (history) => ipcRenderer.send('sync-chat-history', history),
 
-    // 同步浮窗大小到主窗口设置
-    syncFloatSizeToSettings: (size) => ipcRenderer.send('sync-float-size-to-settings', size),
+    // 同步浮窗大小到主窗口设置（已废弃：该回传 IPC 会与 config-updated 广播形成回声循环，
+    // 浮窗大小现统一由主进程 config-sync 兜底同步并下发，此通道不再提供）
+
+    // 设置面板「▶ 状态预览」：让桌宠立即进入该状态并播放其特效
+    previewFloatState: (state) => ipcRenderer.send('float-preview-state', state),
 
     // 拖出房子后最小化主窗口 + 浮窗跟随鼠标
     minimizeAndMoveFloat: (x, y) => ipcRenderer.send('minimize-and-move-float', x, y),
@@ -109,8 +124,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 监听主进程请求同步聊天历史
     onRequestSyncChatHistory: (callback) => ipcRenderer.on('request-sync-chat-history', callback),
 
-    // 监听窗口最小化事件（附带 keepRunningOnClose 设置）
-    onWindowMinimized: (callback) => ipcRenderer.on('window-minimized', (event, keepRunning) => callback(keepRunning)),
+    // 监听窗口最小化事件
+    onWindowMinimized: (callback) => ipcRenderer.on('window-minimized', () => callback()),
 
     // 监听窗口恢复事件
     onWindowRestored: (callback) => ipcRenderer.on('window-restored', callback),
@@ -121,8 +136,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 监听浮窗准备关闭通知
     onFloatPrepareClose: (callback) => ipcRenderer.on('float-prepare-close', (event, payload) => callback(payload)),
 
-    // 监听同步浮窗大小
-    onSyncFloatSize: (callback) => ipcRenderer.on('sync-float-size', (event, size) => callback(size)),
+    // 监听同步浮窗大小（已废弃：同步-float-size 频道随 sync-float-size-to-settings 一并移除，
+    // 大小经 config-updated 广播由 applyConfig 刷新滑杆）
 
     // 移除监听器
     removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
@@ -210,14 +225,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // ===== 多模态（智谱 AI）=====
     captureScreen: (recentMessages) => ipcRenderer.invoke('capture-screen', recentMessages),
+    // 截屏上传 Files API 并缓存，供对话嵌入 file_id 与图像记忆
+    uploadScreenshot: () => ipcRenderer.invoke('multimodal-upload-screenshot'),
+    // 手动添加图片记忆：选择本地图片 -> 上传 Files API -> 本地缓存
+    uploadMemoryImage: () => ipcRenderer.invoke('multimodal-upload-memory-image'),
+    deleteDeepSeekFile: (fileId) => ipcRenderer.invoke('multimodal-delete-file', fileId),
+    listDeepSeekFiles: () => ipcRenderer.invoke('multimodal-list-files'),
+    deleteScreenshotCache: (imagePath) => ipcRenderer.invoke('multimodal-delete-cache', imagePath),
     generateImage: (prompt, size) => ipcRenderer.invoke('generate-image', prompt, size),
     saveChatLog: (content) => ipcRenderer.invoke('save-chat-log', content),
     saveImageFromUrl: (url) => ipcRenderer.invoke('save-image-from-url', url),
     setZhipuKey: (key) => ipcRenderer.send('set-zhipu-key', key),
     setMultimodalEnabled: (enabled) => ipcRenderer.send('set-multimodal-enabled', enabled),
     setCostSaving: (enabled) => ipcRenderer.send('set-cost-saving', enabled),
-    getMultimodalConfig: () => ipcRenderer.invoke('get-multimodal-config'),
+    // 获取统一配置（float/index/设置窗口共用的权威配置）
+    getConfig: () => ipcRenderer.invoke('config-get'),
+    // 转发渲染进程日志到主进程 stdout（tag 用于区分来源窗口）
+    logToMain: (level, message) => ipcRenderer.send('renderer-log', { level, message }),
+
+    // 同步完整配置到主进程（改动后全量推送，主进程广播给其它窗口）
+    syncConfig: (config) => ipcRenderer.send('config-sync', config),
+
+    // 监听配置更新
     onConfigUpdated: (callback) => ipcRenderer.on('config-updated', (event, data) => callback(data)),
+
+    // 监听家里(主窗口)专属设置更新（统一设置窗口改动时触发）
+    onHomeSettingsUpdated: (callback) => ipcRenderer.on('home-settings-updated', (event, data) => callback(data)),
 
     // ===== 陪伴模式 =====
     enterCompanionMode: () => ipcRenderer.send('enter-companion-mode'),
@@ -244,7 +277,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // ===== AI request proxy (main process, resolves SSL issues) =====
     aiChatRequest: (params) => ipcRenderer.invoke('ai-chat-request', params),
 
+    // 测试 API 连接（设置面板"测试 API"按钮）：验证地址、Key 与模型可用性
+    testApi: (params) => ipcRenderer.invoke('ai-test-api', params),
+
     // ===== 贴图包管理 =====
     listStickerPacks: () => ipcRenderer.invoke('list-sticker-packs'),
     setStickerPack: (packName) => ipcRenderer.send('set-sticker-pack', packName),
+    // 打开 img 文件夹（添加贴图包）
+    openStickerFolder: () => ipcRenderer.send('open-img-folder'),
+    // 扫描当前贴图包内 mood_*/浮窗_* 贴图（模块化提示词 & 新状态）
+    getPackAssets: () => ipcRenderer.invoke('get-pack-assets'),
 });

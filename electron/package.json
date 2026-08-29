@@ -5,12 +5,13 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "postinstall": "node scripts/extract-python.js",
-    "setup-tts": "node scripts/install-tts-deps.js",
+    "bootstrap": "node scripts/bootstrap.js",
+    "postinstall": "node scripts/bootstrap.js && node scripts/extract-python.js && node scripts/install-python-deps.js",
+    "setup": "node scripts/install-python-deps.js",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-    "build": "npm run setup-tts && electron-builder --win --x64",
-    "rebuild": "npm run clean && npm run setup-tts && electron-builder --win --x64",
-    "dist": "electron-builder --win --x64"
+    "build": "node scripts/build.js",
+    "rebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && node scripts/build.js",
+    "dist": "node scripts/build.js"
   },
   "author": "PetApp",
   "license": "MIT",

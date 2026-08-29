@@ -90,43 +90,6 @@ body {
     background: rgba(240, 240, 240, var(--window-opacity));
 }
 
-body.portrait-mode .house-container {
-    flex-direction: column;
-    padding: 20px 0;
-    height: 100%;
-    align-items: center;
-    justify-content: center;
-}
-
-body.portrait-mode .house {
-    width: 95%;
-    height: 100%;
-    margin: auto 0;
-}
-
-
-
-
-
-body.portrait-mode .chat-panel,
-body.portrait-mode .settings-panel {
-    position: fixed;
-    bottom: 70px;
-    z-index: 301;
-    width: 95%;
-    height: 70vh;
-    max-height: 600px;
-}
-
-body.portrait-mode .chat-illust {
-    min-width: 90px;
-    padding: 8px 4px;
-}
-
-body.portrait-mode .illust-img {
-    max-height: 65%;
-}
-
 .room {
     display: none;
 }
@@ -548,7 +511,7 @@ body.portrait-mode .illust-img {
     background: linear-gradient(135deg, #667eea, #764ba2);
 }
 
-.chat-panel, .settings-panel {
+.chat-panel {
     position: fixed;
     bottom: 70px;
     left: 50%;
@@ -569,7 +532,7 @@ body.portrait-mode .illust-img {
     box-sizing: border-box;
 }
 
-.chat-panel.show, .settings-panel.show {
+.chat-panel.show {
     display: flex;
     animation: slideUp 0.3s ease;
 }
