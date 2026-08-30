@@ -16,6 +16,7 @@
 - [语音系统](#语音系统)
 - [Agent 工具系统](#agent-工具系统)
 - [记忆系统](#记忆系统)
+- [DSH 联动（deepseek-harness）](#dsh-联动deepseek-harness)
 - [配置项](#配置项)
 - [技术栈](#技术栈)
 - [运行要求](#运行要求)
@@ -97,7 +98,15 @@ electron/
 │       └── vosk-model-small-cn-0.22.zip  # 中文语音识别模型（需解压）
 │
 ├── scripts/
-│   └── extract-python.js        # 构建时解压嵌入式 Python 压缩包
+│   ├── extract-python.js        # 构建时解压嵌入式 Python 压缩包
+│   ├── build.js                 # 一键打包 Windows 安装包的构建脚本
+│   ├── bootstrap.js             # 环境引导（检测/下载嵌入式运行时等）
+│   └── install-python-deps.js   # 为嵌入式 Python 安装 TTS/STT 依赖
+│
+├── dsh-plugin/                  # DSH 联动插件 dsh-pet-link（DeepSeek Harness 侧）
+│   ├── index.js                 # 插件本体：事件监听 + 状态聚合 + HTTP 服务 + 向桌宠推送
+│   ├── cordis.patch.yml         # 插件安装层（Cordis patch，含默认配置）
+│   └── package.json             # bundle 清单（dsh.bundle）
 │
 ├── python/                      # 嵌入式 Python 3.11.9 运行时（npm install 时自动解压）
 ├── dist/                        # electron-builder 打包输出目录
@@ -182,47 +191,48 @@ electron/
 
 ### 主窗口核心功能
 
-| 模块 | 文件 | 说明 |
-|------|------|------|
-| 状态系统 | `js/index.js` | 饱食/快乐/精力/清洁/无聊/好感度，随时间自然衰减，影响行为 |
-| 行为系统 | `js/index.js` | 自动行走、随机玩耍、跟随鼠标、与家具互动、蹭墙、吃东西 |
-| 网格系统 | `js/grid-system.js` | 菱形/正方形视角切换，房间绘制，家具渲染，碰撞检测 |
-| 网格编辑器 | `js/grid-editor.js` | 房间增删改、墙面/地板颜色、家具摆放、拖拽编辑 |
-| 聊天系统 | `js/index.js` | 发送消息、DeepSeek AI 回复、立绘表情切换、多轮对话 |
-| 设置面板 | `js/index.js` | 只保留"家里"专属设置（显示/桌宠比例/AI决策/开发者/网格/房间等） |
-| 存档系统 | `js/index.js` | 保存/加载/导出/导入（JSON 格式），包含状态、记忆、网格、配置 |
+| 模块    | 文件                  | 说明                                   |
+| ----- | ------------------- | ------------------------------------ |
+| 状态系统  | `js/index.js`       | 饱食/快乐/精力/清洁/无聊/好感度，随时间自然衰减，影响行为      |
+| 行为系统  | `js/index.js`       | 自动行走、随机玩耍、跟随鼠标、与家具互动、蹭墙、吃东西          |
+| 网格系统  | `js/grid-system.js` | 菱形/正方形视角切换，房间绘制，家具渲染，碰撞检测            |
+| 网格编辑器 | `js/grid-editor.js` | 房间增删改、墙面/地板颜色、家具摆放、拖拽编辑              |
+| 聊天系统  | `js/index.js`       | 发送消息、DeepSeek AI 回复、立绘表情切换、多轮对话      |
+| 设置面板  | `js/index.js`       | 只保留"家里"专属设置（显示/桌宠比例/AI决策/开发者/网格/房间等） |
+| 存档系统  | `js/index.js`       | 保存/加载/导出/导入（JSON 格式），包含状态、记忆、网格、配置   |
 
 ### 浮窗核心功能
 
-| 模块 | 文件 | 说明 |
-|------|------|------|
-| 自由游荡 | `float.js` | 随机方向移动，屏幕边界反弹，速度随机变化 |
-| 重力模式 | `float.js` | 底部水平行走，抛物线上抛，碰撞窗口反弹 |
-| 拖拽交互 | `float.js` | 鼠标拖拽桌宠，释放后抛物线回落；拖拽/发现饼干可打断状态链 |
-| 聊天模式 | `float.js` | 进入独立聊天窗口，AI 对话，TTS 朗读回复 |
-| 饼干检测 | `float.js` | 检测饼干位置，靠近时自动走过去吃掉 |
-| **状态链** | `float.js` | 可配置的状态序列（如 吃饭→吃饭→睡觉），以一定概率被随机触发；被打断后进入用户指定的中断状态，可在设置面板增删 |
+| 模块       | 文件         | 说明                                                                 |
+| -------- | ---------- | ------------------------------------------------------------------ |
+| 自由游荡     | `float.js` | 随机方向移动，屏幕边界反弹，速度随机变化                                               |
+| 重力模式     | `float.js` | 底部水平行走，抛物线上抛，碰撞窗口反弹                                                |
+| 拖拽交互     | `float.js` | 鼠标拖拽桌宠，释放后抛物线回落；拖拽/发现饼干可打断状态链                                      |
+| 聊天模式     | `float.js` | 进入独立聊天窗口，AI 对话，TTS 朗读回复                                            |
+| 饼干检测     | `float.js` | 检测饼干位置，靠近时自动走过去吃掉                                                  |
+| **状态链**  | `float.js` | 可配置的状态序列（如 吃饭→吃饭→睡觉），以一定概率被随机触发；被打断后进入用户指定的中断状态，可在设置面板增删           |
 | **设置面板** | `float.js` | 独立窗口（`?mode=settings`），管理浮窗/饼干/贴图/AI/语音/记忆/状态链/开机自启/回家等全部非"家里"专属设置 |
-| **开机自启** | `main.js` | 设置面板"🚀 开机自启动"开关，通过 `app.setLoginItemSettings` 实现 |
+| **开机自启** | `main.js`  | 设置面板"🚀 开机自启动"开关，通过 `app.setLoginItemSettings` 实现                  |
 
 ### 陪伴模式核心功能
 
-| 模块 | 文件 | 说明 |
-|------|------|------|
-| 持续录音 | `companion.js` | 浏览器 MediaRecorder API，30ms 分帧发送到 STT 服务 |
-| VAD 检测 | `stt_server.py` | 基于能量的语音活动检测，800ms 静音超时自动断句 |
-| 语音识别 | `stt_server.py` | Vosk 离线中文模型，无需联网 |
-| AI 对话 | `companion.js` | 智谱 GLM-4-Flash，支持语音输入理解和屏幕上下文 |
-| 屏幕感知 | `main.js` → `companion.js` | 定时截图（桌面捕捉），通过智谱 GLM-4V 分析 |
-| 主动搭话 | `companion.js` | 基于屏幕内容、时间上下文、对话历史，AI 自主决定是否开口 |
-| 语音朗读 | `companion.js` | AI 回复自动通过 Edge TTS 朗读 |
+| 模块     | 文件                         | 说明                                      |
+| ------ | -------------------------- | --------------------------------------- |
+| 持续录音   | `companion.js`             | 浏览器 MediaRecorder API，30ms 分帧发送到 STT 服务 |
+| VAD 检测 | `stt_server.py`            | 基于能量的语音活动检测，800ms 静音超时自动断句              |
+| 语音识别   | `stt_server.py`            | Vosk 离线中文模型，无需联网                        |
+| AI 对话  | `companion.js`             | 智谱 GLM-4-Flash，支持语音输入理解和屏幕上下文           |
+| 屏幕感知   | `main.js` → `companion.js` | 定时截图（桌面捕捉），通过智谱 GLM-4V 分析               |
+| 主动搭话   | `companion.js`             | 基于屏幕内容、时间上下文、对话历史，AI 自主决定是否开口           |
+| 语音朗读   | `companion.js`             | AI 回复自动通过 Edge TTS 朗读                   |
 
 ## IPC 通信
 
 `preload.js` 通过 `contextBridge` 向渲染进程暴露 `window.electronAPI`，提供以下 IPC 通道：
 
 ### 窗口管理
-- `restore-main-window` / `window-minimize` / `window-maximize` / `window-close`
+
+- `window-minimize` / `window-maximize` / `window-close`
 - `window-set-size` / `set-window-opacity`
 - `main-window-resize` / `window-minimized` / `window-restored`
 - `show-index-window`（浮窗"🏠 回家"唤起主窗口 index.html）
@@ -230,36 +240,43 @@ electron/
 - `set-login-item`（开机自启动开关）
 
 ### 浮窗通信
+
 - `float-enter-chat-mode` / `float-exit-chat-mode`
 - `update-float-message` / `move-float-window` / `resize-float-window`
 - `set-float-pet-size` / `set-float-move-mode` / `set-float-bounce-windows`
 - `set-float-show-illust` / `set-cookie-spawn-enabled`
 
 ### 饼干系统
+
 - `get-cookie-position` / `cookie-position-update` / `request-eat-cookie` / `cookie-eaten`
 - `request-spawn-cookie` / `close-cookie-window` / `set-cookie-size`
 - `cookie-config` / `pet-position-update` / `eat-cookie` / `cookie-drag-timeout`
 
 ### 记忆系统
+
 - `memory-load` / `memory-save` / `save-memory-item` / `get-memory-items`
 - `trigger-memory-summary` / `memory-updated`
 
 ### 配置同步
+
 - `set-zhipu-key` / `set-multimodal-enabled` / `set-cost-saving` / `set-ai-prompt`
 - `config-updated` / `get-multimodal-config`
 
 ### 语音系统
+
 - `speak-text` (TTS) / `get-tts-voices`
 - `stt-stream-init` / `stt-stream-audio` / `stt-stream-reset` / `stt-stream-end`
 - `stt-ready` / `stt-result` / `stt-ended`
 
 ### AI 请求
+
 - `ai-chat-request` (主进程代理，解决渲染进程 SSL 问题)
 - `capture-screen` (桌面截图 + 智谱 GLM-4V 分析)
 - `generate-image` (智谱 CogView 图像生成)
 - `save-chat-log` / `save-image-from-url`
 
 ### Agent 工具
+
 - `execute-tool` (工具调度，详见下方)
 
 ## AI 系统
@@ -338,9 +355,11 @@ electron/
 主进程通过 `execute-tool` IPC 提供统一的工具调用接口，AI 可在对话中调用以下工具：
 
 ### 笔记操作
+
 - `write_note` / `read_note` / `delete_note`：管理纯文本笔记（保存在 `Documents/PetNotes/`）
 
 ### 系统操作
+
 - `open_app`：打开系统应用（计算器、记事本、浏览器、微信、QQ、VS Code 等）
 - `open_url`：在浏览器中打开网址
 - `set_volume` / `get_volume`：调节/获取系统音量
@@ -348,18 +367,21 @@ electron/
 - `get_system_info`：获取 CPU/内存/磁盘使用率
 
 ### 信息查询
+
 - `get_weather`：查询指定城市天气（通过 wttr.in）
 - `get_time`：获取当前日期时间
 - `translate`：翻译文本（通过 mymemory.translate.net）
 - `calculate`：安全数学计算
 
 ### 程序资产管理
+
 - `save_program` / `add_program` / `list_programs` / `describe_program`
 - `run_program` / `update_program` / `delete_program` / `edit_program_description` / `export_program`
 - 支持 Python、JavaScript、Bash、HTML 四种类型
 - 程序保存在 `Documents/PetWorkspace/programs/`，元信息在 `manifest.json`
 
 ### 媒体与 AI
+
 - `capture_screen`：截图 + 智谱 GLM-4V 分析
 - `generate_image`：智谱 CogView 图像生成
 - `run_python`：执行临时 Python 脚本
@@ -390,7 +412,7 @@ electron/
 
 - **手动添加**：设置面板中"🖼 图片记忆"按钮选择本地图片，自动上传获取 `file_id` 并保存为图像记忆（描述必填：记忆输入框有文字则用它，否则弹出填写框）
 - **删除**：删除图像记忆时会同步调用 DELETE 接口清理 Files API 中的图片
-- **对话中使用**：vision 模型对话时，所有已保存的图像记忆会以真实图片（file_id）附带在请求中，模型提问时可看到图片内容
+- **对话中使用**：vision 模型对话时，所有已保存的图像记忆会以真实图片（file\_id）附带在请求中，模型提问时可看到图片内容
 - **注意事项**：DeepSeek Files API 中的文件有服务端保留期，若图像记忆的 `file_id` 过期失效，重新添加一次该图片记忆即可
 
 ### 强制图像记忆（forcememory）
@@ -398,13 +420,11 @@ electron/
 想强制把本次对话的**最后一张截图**保存为图像记忆（描述固定为 `test`）时：
 
 1. 在对话中发送一条包含触发词的消息，支持以下写法（大小写不限）：
-
    ```
    forcememory
    forcemomory        # 常见拼写变体，同样识别
    force memory       # 带空格/连字符/下划线亦识别
    ```
-
 2. **关闭聊天窗口**，触发记忆总结（主进程先拦截关闭 → 执行总结 → 确认关闭）。
 
 机制说明：
@@ -414,38 +434,126 @@ electron/
 - 该回合必须存在截图，否则无图可保存（指令不会注入）
 - 主进程日志可验证：`[float:summary] start ... forceMemory=true lastIdx=N` → `done ... imageMemories=1`
 
+## DSH 联动（deepseek-harness）
+
+桌宠可以感知 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）Agent 的任务状态：跑任务时在窗口角落显示 **DSH 任务面板**（todolist 列表，点击「查看当前输出」可展开实时思维链/工具调用流），每个细分任务完成后桌宠会**说话并切换贴图**；还可以在设置面板里直接给 DSH **派发/取消任务**，并实时查看 **API 花费 / 余额 / 缓存命中率**。
+
+### 组件
+
+- `electron/dsh-plugin/` —— DSH 侧插件 `dsh-pet-link`（标准 Cordis bundle，Web UI 与桌面版 DSH 共用同一 profile 机制，天然兼容）
+  - 监听 `agent/status`、`session/event`（`turn/*`、`step/*`、`tool/call`、`assistant/chunk|message`）、`tools/result`，维护 todolist 与实时输出
+  - 内置 HTTP 服务（默认 `127.0.0.1:43999`）：`GET /status`、`POST /send`、`POST /cancel`
+  - 细分任务完成（turn/end）时向桌宠推送 `{ say, state, todolist, output, usage }`
+- 桌宠侧（`main.js` / `float.js` / `float.html`）
+  - 主进程本地服务（默认 `127.0.0.1:34165`）：`GET /dsh/status` 供插件拉取已注册状态列表；`POST /dsh/message` 接收推送并广播给所有窗口
+  - 定时查询官方 `GET /user/balance` 展示余额
+  - 浮窗/聊天窗口右下角任务面板；设置面板「DSH 联动」区块（开关 / 插件端口 / 派发任务 / 取消 / 状态监控）
+
+### 安装插件（二选一）
+
+```bash
+# 方式 A：本地目录直接安装（拿到克隆/解压后的 dsh-plugin 目录路径）
+dsh plugin --profile demo add /path/to/pet-app/electron/dsh-plugin
+
+# 方式 B：发布到 npm / tarball 后安装
+dsh plugin --profile demo add dsh-pet-link
+```
+
+> 提示：`dsh plugin` 会用 pnpm 安装；从 Git 直接安装 CD 包需要手工放行 `allowBuilds`（本插件无构建脚本、零依赖，放行为可选项）。
+
+### 启用流程
+
+1. 先启动桌宠应用（`npm start`），确认日志出现 `[DSH] 桌宠状态服务已启动 http://127.0.0.1:34165`
+2. 启动 DSH（`npx @deepseek-ai/dsh web` 或桌面版），用上面的命令把 `dsh-pet-link` 装进 profile 并重启 DSH；日志应出现 `[pet-link] 已启动 http://127.0.0.1:43999` 与 `已从桌宠拉取状态列表: ...`
+3. 桌宠设置 →「DSH 联动」打开开关；在 DSH 里跑任务即可看到桌宠面板与反应；也可直接在该区块输入任务点「🚀 派发」
+
+### 配置说明（dsh-plugin/cordis.patch.yml）
+
+| 字段       | 默认                       | 说明                                                    |
+| -------- | ------------------------ | ----------------------------------------------------- |
+| `port`   | `43999`                  | 插件 HTTP 服务端口，须与桌宠设置里的「插件端口」一致                         |
+| `petUrl` | `http://127.0.0.1:34165` | 桌宠本地状态服务地址                                            |
+| `say`    | 内置文案                     | 细分任务完成后桌宠说的话，支持 `{task}` `{tool}` `{dur}` `{hit}` 占位符 |
+| `states` | 语义兜底                     | 事件 → 桌宠贴图状态名（必须是已注册的 `浮窗_xx` 原名：如 `工作`/`开心`/`难过`）     |
+
+> 说明：贴图状态名以桌宠实际注册为准（无需预设集合，贴图包里有哪些 `浮窗_*.png` 就能用哪些）；插件启动时自动从桌宠拉取当前状态列表，映射不存在时自动兜底。
+
+### 原生审批（用户确认）
+
+`dsh-pet-link` **改造 DSH 自带的用户确认机制**（`@deepseek-ai/dsh-user-approval` 的 `approval/request` answerer）：当 DSH 需要用户批准操作（bash 提权、沙箱升级、ask 策略工具等）时，确认请求不再弹在 DSH 页面里，而是推送到桌宠，桌宠弹出「允许 / 拒绝 / 取消」按钮，选择结果返回 DSH：
+
+```
+DSH 工具策略触发 ctx.approval.request()
+   → approval/request（waterfall）→ dsh-pet-link answerer
+   → 推送到桌宠 → 桌宠弹窗（🔐 允许 / 拒绝 / 取消）
+   → 用户点选 → 桌宠主进程 POST /ask/result → answerer 返回 allowed-once / rejected / cancelled
+```
+
+- 依据官方约定：一个部署只挂一个 terminal answerer（本插件即为该 answerer），应答即认领，不再外派
+- 3 分钟未应答视为 `cancelled`；请求确认属会话日志的 `approval/asked` + `approval/decided` 审计对，模型只见最终工具结果，不受审批 UI 干扰
+- 插件日志 `[pet-link] 审批应答: <工具> → <outcome>` 可追踪全过程
+
+### 覆盖状态机与环节贴图
+
+设置 →「DSH 联动」可配置：
+
+- **任务运行中覆盖（暂停）桌宠状态机**（默认开启）：DSH 任务进行期间暂停桌宠的随机状态机，空闲时自动恢复
+- **环节贴图状态**（各环节可选贴图，保留该状态配置的特效；选「不覆盖」则该环节不切贴图）：
+  - 💭 思考 Think · ⌨️ 命令 Pwsh · 📖 读取 Read · 🔍 搜索 Grep · ✅ 任务完成 · ❌ 任务失败
+- **面板上方思维栏**（默认开启）：任务面板上方实时显示 DSH 最新思维链 / 使用的工具与参数 / 查找内容（由 `dsh-pet-link` 从 `assistant/chunk` 的 reasoning 与 `tool/call` 抓取推送）
+
+### 贴图下方信息条
+
+桌宠窗口底部有一条半透明信息条（位于 **设置 →「🪟 浮窗」→「📊 贴图下方信息条显示项」**；fixed 定位，**显示时桌宠贴图与按钮自动上移**，三者不重叠），逐项可开关：
+
+- **DSH 状态**：连接状态（🟢/⚪）、缓存命中率、累计花费
+- **硬件监控**：CPU 占用 / 内存占用 / CPU 温度（Windows 下尽力而为，读不到温度则省略该项）
+- **当前峰谷时段**：DeepSeek 计费高峰/空闲提示（高峰：北京时间周一至周五 9:00–12:00 与 14:00–18:00；其余时段含周末为空闲，空闲价格 = 高峰一半，累计花费按此折算）
+
+三项都在 设置 →「DSH 联动」→「贴图下方信息条显示项」勾选；全部关闭时信息条自动隐藏。
+
+### 端口与数据流
+
+```
+dsh-pet-link (DSH)  ──POST /dsh/message──▶  桌宠 :34165  ──IPC 广播──▶  所有窗口
+      ▲                                          │
+      │ GET /status  POST /send /cancel           │ 定时 GET /user/balance
+  桌宠设置面板 ◀──────IPC dsh-*────── 主进程       │
+```
+
 ## 配置项
 
 所有配置通过 `localStorage` 的 `petConfig` 键存储，由**统一设置窗口**（`float.html?mode=settings`）统一管理，通过 IPC 同步到各窗口。主窗口（家里）与浮窗共用同一套设置界面：主窗口右上角 ⚙️ 与浮窗气泡里的 ⚙️ 都打开同一个设置窗口，改动实时生效。
 
-| 分类 | 配置项 | 说明 |
-|------|--------|------|
-| 浮窗 | 桌宠大小、移动模式、碰撞窗口、饼干生成/大小、立绘显示 | 控制浮窗（默认窗口）行为 |
-| 显示设置 | 窗口/墙面/地板透明度、竖屏适配 | 控制家里窗口外观 |
-| 桌宠设置（家里） | 主窗口桌宠/家具/按钮大小、陪伴窗口宽度 | 控制家里与陪伴窗口尺寸 |
-| AI | API Key、API 地址、AI 人设 | 控制 AI 对话参数 |
-| 多模态 | 智谱 API Key、启用开关、节省成本 | 控制多模态 AI 功能 |
-| 语音 | 朗读开关、音色选择、音量 | 控制 TTS 语音设置 |
-| 记忆 | 启用开关 | 管理长期记忆 |
-| **状态链** | 状态序列列表、被打断后进入状态 | 可增删的桌宠状态链（如 吃饭→吃饭→睡觉），随机触发 |
-| **启动** | 开机自启动 | 随系统开机自动运行桌宠 |
-| **家里窗口** | 回家按钮 | 从设置窗口唤起家里窗口 |
-| **退出** | 退出应用 | 彻底退出整个应用 |
+| 分类         | 配置项                         | 说明                                                                          |
+| ---------- | --------------------------- | --------------------------------------------------------------------------- |
+| 浮窗         | 桌宠大小、移动模式、碰撞窗口、饼干生成/大小、立绘显示 | 控制浮窗（默认窗口）行为                                                                |
+| 显示设置       | 窗口/墙面/地板透明度、竖屏适配            | 控制家里窗口外观                                                                    |
+| 桌宠设置（家里）   | 主窗口桌宠/家具/按钮大小、陪伴窗口宽度        | 控制家里与陪伴窗口尺寸                                                                 |
+| AI         | API Key、API 地址、AI 人设        | 控制 AI 对话参数                                                                  |
+| 多模态        | 智谱 API Key、启用开关、节省成本        | 控制多模态 AI 功能                                                                 |
+| 语音         | 朗读开关、音色选择、音量                | 控制 TTS 语音设置                                                                 |
+| 记忆         | 启用开关                        | 管理长期记忆                                                                      |
+| **状态链**    | 状态序列列表、被打断后进入状态             | 可增删的桌宠状态链（如 吃饭→吃饭→睡觉），随机触发                                                  |
+| **DSH 联动** | 启用开关、插件端口、派发/取消任务、状态监控      | 与 deepseek-harness 的 dsh-pet-link 插件通信（详见[DSH 联动](#dsh-联动deepseek-harness)） |
+| **启动**     | 开机自启动                       | 随系统开机自动运行桌宠                                                                 |
+| **家里窗口**   | 回家按钮                        | 从设置窗口唤起家里窗口                                                                 |
+| **退出**     | 退出应用                        | 彻底退出整个应用                                                                    |
 
 ## 技术栈
 
-| 层级 | 技术 | 用途 |
-|------|------|------|
-| 框架 | Electron 31 | 桌面应用框架 |
-| 前端 | 原生 HTML / CSS / JavaScript | 渲染进程 UI |
-| 打包 | electron-builder (NSIS) | Windows 安装包构建 |
-| AI 对话 | DeepSeek API (deepseek-chat) | 主窗口聊天 AI |
-| AI 对话 | 智谱 GLM-4-Flash | 陪伴模式对话 AI |
-| AI 视觉 | 智谱 GLM-4V-Flash | 屏幕截图分析 |
-| AI 图像 | 智谱 CogView-3-Flash | AI 图像生成 |
-| 语音合成 | Edge TTS (edge-tts Python 库) | 云端语音合成 |
-| 语音识别 | Vosk 离线模型 | 本地语音识别 |
-| 嵌入式 Python | 3.11.9 embeddable | TTS/STT 服务运行环境 |
+| 层级         | 技术                           | 用途             |
+| ---------- | ---------------------------- | -------------- |
+| 框架         | Electron 31                  | 桌面应用框架         |
+| 前端         | 原生 HTML / CSS / JavaScript   | 渲染进程 UI        |
+| 打包         | electron-builder (NSIS)      | Windows 安装包构建  |
+| AI 对话      | DeepSeek API (deepseek-chat) | 主窗口聊天 AI       |
+| AI 对话      | 智谱 GLM-4-Flash               | 陪伴模式对话 AI      |
+| AI 视觉      | 智谱 GLM-4V-Flash              | 屏幕截图分析         |
+| AI 图像      | 智谱 CogView-3-Flash           | AI 图像生成        |
+| 语音合成       | Edge TTS (edge-tts Python 库) | 云端语音合成         |
+| 语音识别       | Vosk 离线模型                    | 本地语音识别         |
+| 嵌入式 Python | 3.11.9 embeddable            | TTS/STT 服务运行环境 |
 
 ## 运行要求
 
@@ -474,13 +582,9 @@ npm run build   # 生成 dist/ 目录下的 NSIS 安装包
 ### 关键设计决策
 
 1. **多窗口架构**：主窗口、浮窗、聊天窗口、陪伴窗口、饼干窗口各自独立，通过 IPC 通信和状态同步协同工作。
-
 2. **Python 子进程**：TTS 和 STT 服务通过独立 Python 子进程运行，使用 stdin/stdout JSON 行协议通信，避免阻塞 Electron 主进程。
-
 3. **主进程 AI 代理**：所有 AI API 请求通过主进程发起（`ai-chat-request` IPC），解决渲染进程 SSL 证书验证问题。
-
 4. **配置持久化**：配置通过 `localStorage` 存储，记忆通过主进程直接读写 JSON 文件，确保数据可靠性和跨窗口同步。
-
 5. **安全性**：使用 `contextBridge` + `preload.js` 进行安全的 IPC 暴露，不启用 `nodeIntegration`，遵循 Electron 安全最佳实践。
 
 ### 浮窗物理与渲染对位（踩坑记录）
@@ -491,10 +595,8 @@ npm run build   # 生成 dist/ 目录下的 NSIS 安装包
 
 1. **尺寸 CSS 变量初始化时序**：`applySavedFloatConfig()` 改了 `currentPetSize` 后，若没有立即调用 `updateWindowSize()`，`.float-container` 尺寸与 `--float-pet-bottom` / `--float-pet-size` 就停留在默认值（160×140 / fallback）。Electron 下要等主进程 `float-pet-size` 的 IPC 消息到达才更新，浏览器下该 IPC 永不触发、永不更新 → 两种环境渲染分叉，且物理碰撞用的是过期的 `getContainerHeight()`，改参数自然"没变化"。
    **结论**：任何配置项应用到运行时后，必须**同步立即刷新**容器/窗口尺寸与 CSS 变量，不能只依赖 IPC 到达。
-
 2. **碰撞箱坐标系混淆**：`posY` / `lastWindowY` 是**窗口顶部**坐标，窗口底部 = `posY + winH`。旧代码底部边界用的是 `getPetBottomOffset()`（贴图内部偏移，约等于半个窗口高），而非整个 `winH`，导致窗口底部多出近一个窗口高度，下半屏落在屏幕外。修正：底边界 = `workArea.y + workArea.height - winH`，顶边界 = `workArea.y`，左右边界 = `workArea.x` / `workArea.x + width - winW` —— 即统一按"窗口顶部坐标 + 整窗尺寸"表达边界，而不是贴图偏移量。
-
-3. **`lastWindowX/Y` 与实际位置脱节**：初始化若硬编码为屏幕右下角，或 resize 后用 `setTimeout(0)`/立即读 `window.screenY` 试图回写物理位置，会读到/覆写成旧值 —— IPC `setBounds` 是异步的，尚未生效。这会让重力物理从错误高度起跳、并把 `wander` 已设好的地面坐标覆盖掉。
+3. **`lastWindowX/Y`** **与实际位置脱节**：初始化若硬编码为屏幕右下角，或 resize 后用 `setTimeout(0)`/立即读 `window.screenY` 试图回写物理位置，会读到/覆写成旧值 —— IPC `setBounds` 是异步的，尚未生效。这会让重力物理从错误高度起跳、并把 `wander` 已设好的地面坐标覆盖掉。
    **结论**：渲染进程的"逻辑位置变量"与主进程窗口实际位置的同步，必须发生在主进程真正完成坐标变更之后；不要在 IPC 调用后立即读取回写。
 
 **为什么"只加了设置、没改数值"问题就自愈**：新增设置滑块并重新加载浮窗时，`applySavedFloatConfig()` 后紧跟着的 `updateWindowSize()` 一起生效，把第 1 条（容器/窗口尺寸初始化）修复了，物理碰撞随之回到正确尺寸，因此即使滑块保持默认值，显示也恢复正常。
@@ -508,6 +610,6 @@ npm run build   # 生成 dist/ 目录下的 NSIS 安装包
 
 ## ☕ 请作者喝一杯咖啡
 
-如果这个桌宠小屋给你带来了快乐，欢迎请我喝一杯咖啡~
+如果这个桌宠小屋给你带来了快乐，欢迎请我喝一杯咖啡\~
 
 ![收款码](img/donate.png)

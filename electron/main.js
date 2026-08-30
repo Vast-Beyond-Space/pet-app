@@ -890,11 +890,6 @@ function showMainWindow() {
     }
 }
 
-// IPC 处理：恢复主窗口
-ipcMain.on('restore-main-window', () => {
-    handleMainWindowRestore();
-});
-
 // IPC 处理：开机自启动（设置面板"开机自启"开关）
 ipcMain.on('set-login-item', (event, enabled) => {
     try {
@@ -2110,7 +2105,7 @@ ipcMain.on('open-img-folder', () => {
 });
 
 // 扫描当前贴图包内 mood_*/浮窗_* 贴图，供渲染端动态生成 AI 提示词 & 新状态
-ipcMain.handle('get-pack-assets', async () => {
+function scanPackAssets() {
     const imgDir = path.join(__dirname, 'img');
     const assets = { moods: [], states: [], moodFileMap: {}, stateFileMap: {} };
     try {
@@ -2151,7 +2146,453 @@ ipcMain.handle('get-pack-assets', async () => {
         console.error('[PackAssets] 扫描失败:', e);
     }
     return assets;
+}
+
+ipcMain.handle('get-pack-assets', async () => scanPackAssets());
+
+// ============================================================
+// ===== DSH 联动（与 deepseek-harness 的 dsh-pet-link 插件通信）=====
+// ============================================================
+// 桌宠侧职责：
+//   1. 本地 HTTP 服务（默认 127.0.0.1:34165）：
+//      - GET  /dsh/status        供 dsh-pet-link 插件启动时拉取已注册状态列表/桌宠信息
+//      - POST /dsh/message       接收插件推送的状态事件（say / state / todolist / output / usage）
+//   2. 向插件端口转发「派任务 / 取消任务」请求（桌宠设置面板按钮触发）
+//   3. 定时查询 DeepSeek 官方余额，供状态面板展示
+//   4. 把插件推送广播给所有窗口（桌宠据此说话/切换贴图/渲染任务面板）
+// ============================================================
+
+const DSH_DEFAULT_PET_PORT = 34165;   // 桌宠本地状态服务端口
+const DSH_DEFAULT_PLUGIN_PORT = 43999; // dsh-pet-link 插件 HTTP 端口
+let dshEnabled = false;
+let dshPetPort = DSH_DEFAULT_PET_PORT;
+let dshPluginPort = DSH_DEFAULT_PLUGIN_PORT;
+// 上一条推送到来时桌宠的已注册状态名列表（插件「切贴图」时据此校验）
+let dshPetStatesCache = [];
+
+// 插件侧可随时查询的聚合状态（供设置面板 / 插件 /status 使用）
+const petDshState = {
+    pluginReachable: false,   // 能否连上 dsh-pet-link 插件端口
+    agentStatus: 'unknown',   // idle / running / unknown
+    task: '',                 // 当前任务描述
+    todolist: [],             // todolist 条目（[{ text, status }]）
+    output: [],               // 最近输出流（思维链/工具调用，尾部为最新）
+    lastTool: '',             // 最近一次工具名
+    usage: null,              // 最近一次请求 usage
+    totals: { tokens: 0, cost: 0, cacheHit: 0, cacheMiss: 0 }, // 累计统计
+    balance: null,            // 官方余额接口结果
+    updatedAt: null
+};
+
+function dshPluginBase() { return `http://127.0.0.1:${dshPluginPort}`; }
+
+// DeepSeek API 错峰计费（北京时间）：高峰 = 周一至周五 9:00–12:00 / 14:00–18:00，
+// 其余时段（含周末）为空闲时段；空闲时段价格 = 高峰价格的一半。
+// getUTCDay/Hours 配合 +8h 偏移换算北京时间，避免依赖运行机本地时区。
+function ratePeriodNow() {
+    const now = new Date(Date.now() + 8 * 3600 * 1000); // 当前北京时间
+    const day = now.getUTCDay();        // 0=周日 .. 6=周六
+    const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
+    const isWeekday = day >= 1 && day <= 5; // 周一..周五
+    const isPeak = isWeekday && ((mins >= 9 * 60 && mins < 12 * 60) || (mins >= 14 * 60 && mins < 18 * 60));
+    return {
+        period: isPeak ? 'peak' : 'off-peak',
+        label: isPeak ? '高峰时段' : '空闲时段',
+        factor: isPeak ? 1 : 0.5 // 空闲价格 = 高峰一半
+    };
+}
+function dshOrigin() {
+    try { const u = new URL(deepseekApiBase()); return `${u.protocol}//${u.host}`; }
+    catch (e) { return 'https://api.deepseek.com'; }
+}
+
+function sendToAllWindows(channel, payload) {
+    BrowserWindow.getAllWindows().forEach(win => {
+        if (!win.isDestroyed()) win.webContents.send(channel, payload);
+    });
+}
+
+// 桌宠当前已注册状态（贴图原名列表，供插件切贴图时用）
+function getPetStates() {
+    return scanPackAssets().states || [];
+}
+
+// 将 DSH 插件推送写入聚合状态并广播给所有窗口
+function acceptDshMessage(payload) {
+    if (!payload || typeof payload !== 'object') return;
+    const p = payload;
+    if (p.agentStatus != null) petDshState.agentStatus = p.agentStatus;
+    if (p.task != null) petDshState.task = p.task;
+    if (Array.isArray(p.todolist)) petDshState.todolist = p.todolist;
+    if (Array.isArray(p.output) && p.output.length) {
+        if (!Array.isArray(petDshState.output)) petDshState.output = [];
+        petDshState.output = petDshState.output.concat(p.output).slice(-200);
+    }
+    if (p.tool != null) petDshState.lastTool = p.tool;
+    // 累计统计以插件侧 totals 为唯一来源（插件在每条推送里都带累计值，
+    // 自己按 usage 再累加会造成双重复计；仅当推送没带 totals 时兜底自累加）
+    if (p.totals && typeof p.totals === 'object') {
+        petDshState.totals = {
+            tokens: Number(p.totals.tokens) || 0,
+            cost: Number(p.totals.cost) || 0,
+            cacheHit: Number(p.totals.cacheHit) || 0,
+            cacheMiss: Number(p.totals.cacheMiss) || 0
+        };
+    }
+    if (p.usage && typeof p.usage === 'object') {
+        petDshState.usage = p.usage;
+        if (!(p.totals && typeof p.totals === 'object')) {
+            const u = p.usage;
+            // DSH 归一化 usage（inputTokens/outputTokens/cacheReadTokens/cacheWriteTokens）优先，
+            // 兼容原始 DeepSeek 字段（prompt_tokens/prompt_cache_*_tokens/completion_tokens）兜底。
+            const hit = Number(u.cacheReadTokens) || Number(u.prompt_cache_hit_tokens) || 0;
+            const miss = Number(u.inputTokens) || Number(u.prompt_cache_miss_tokens) || 0;
+            const write = Number(u.cacheWriteTokens) || 0;
+            const inTok = Number(u.prompt_tokens) || (hit + miss + write);
+            const outTok = Number(u.completion_tokens) || Number(u.outputTokens) || 0;
+            petDshState.totals.tokens += inTok + outTok;
+            petDshState.totals.cacheHit += hit;
+            petDshState.totals.cacheMiss += miss;
+            // 花费按 deepseek-v4-flash 预估（命中 0.2 元/M，未命中 1 元/M，输出 3 元/M；仅供参考），
+            // 空闲时段（北京时间非高峰）价格减半
+            const rateF = ratePeriodNow().factor;
+            petDshState.totals.cost += (hit / 1e6) * 0.2 * rateF + (miss / 1e6) * 1 * rateF + (outTok / 1e6) * 3 * rateF;
+        }
+    }
+    petDshState.updatedAt = Date.now();
+    sendToAllWindows('dsh-message', {
+        event: p.event || 'message',
+        say: p.say || '',
+        state: p.state || '',
+        category: p.category || '',   // 浮窗「覆盖状态机」按环节切贴图依赖此字段
+        minds: Array.isArray(p.minds) ? p.minds : undefined, // 浮窗思维栏
+        tool: p.tool || '',
+        question: p.question,
+        options: p.options,
+        toolName: p.toolName,
+        reason: p.reason,
+        agentStatus: petDshState.agentStatus,
+        task: petDshState.task,
+        todolist: petDshState.todolist,
+        output: petDshState.output,
+        totals: petDshState.totals,
+        balance: petDshState.balance,
+        pluginReachable: petDshState.pluginReachable,
+        updatedAt: petDshState.updatedAt
+    });
+}
+
+// 定时探测插件端口：插件先启动/网络抖动时也能感知在线状态，并顺带同步插件侧聚合状态
+async function probeDshPlugin() {
+    try {
+        const res = await fetch(dshPluginBase() + '/status', { signal: AbortSignal.timeout(2500) });
+        if (res.ok) {
+            const body = await res.json();
+            const wasReachable = petDshState.pluginReachable;
+            const prevStatus = petDshState.agentStatus;
+            petDshState.pluginReachable = true;
+            if (body && typeof body === 'object') {
+                if (body.agentStatus === 'idle' || body.agentStatus === 'running') petDshState.agentStatus = body.agentStatus;
+                if (body.task != null) petDshState.task = body.task;
+                if (Array.isArray(body.todolist)) petDshState.todolist = body.todolist;
+                if (body.lastTool != null) petDshState.lastTool = body.lastTool;
+                if (body.totals && typeof body.totals === 'object') petDshState.totals = { ...petDshState.totals, ...body.totals };
+            }
+            if (prevStatus !== petDshState.agentStatus) {
+                // 插件未及时推送时，轮询发现运行/空闲切换也广播给浮窗，
+                // 保证「DSH 进入工作模式 → 桌宠覆盖状态机激活/退出」不被推送丢失拖累
+                sendToAllWindows('dsh-message', {
+                    event: 'status/sync', agentStatus: petDshState.agentStatus,
+                    pluginReachable: true, totals: petDshState.totals
+                });
+            }
+            if (!wasReachable) {
+                sendToAllWindows('dsh-message', {
+                    event: 'plugin/ready', agentStatus: petDshState.agentStatus,
+                    totals: petDshState.totals, pluginReachable: true
+                });
+            }
+        } else {
+            petDshState.pluginReachable = false;
+        }
+    } catch (e) {
+        petDshState.pluginReachable = false;
+    }
+}
+
+// 向插件发 JSON 请求
+function postJsonToDsh(pathname, body) {
+    return new Promise((resolve) => {
+        const url = dshPluginBase() + pathname;
+        const data = JSON.stringify(body || {});
+        const req = http.request(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+            timeout: 5000
+        }, (res) => {
+            let raw = '';
+            res.on('data', c => { raw += c; });
+            res.on('end', () => {
+                petDshState.pluginReachable = true;
+                let data;
+                try { data = raw ? JSON.parse(raw) : {}; }
+                catch (e) { data = raw; }
+                if (res.statusCode >= 200 && res.statusCode < 300) resolve({ ok: true, data });
+                else resolve({ ok: false, data, httpStatus: res.statusCode });
+            });
+        });
+        req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'timeout' }); });
+        req.on('error', (e) => { petDshState.pluginReachable = false; resolve({ ok: false, error: e.message }); });
+        req.end(data);
+    });
+}
+
+// 查询 DeepSeek 官方余额
+async function refreshDshBalance() {
+    const key = deepseekKey();
+    if (!key) {
+        console.warn('[DSH] balance skipped: DeepSeek API Key not configured (unifiedConfig.apiKey)');
+        return;
+    }
+    try {
+        const res = await fetch(`${dshOrigin()}/user/balance`, {
+            headers: { Accept: 'application/json', Authorization: `Bearer ${key}` }
+        });
+        if (res.ok) {
+            const body = await res.json();
+            petDshState.balance = body;
+            sendToAllWindows('dsh-message', { event: 'balance', balance: body, totals: petDshState.totals });
+        } else {
+            console.warn('[DSH] balance query failed: HTTP', res.status);
+        }
+    } catch (e) {
+        console.warn('[DSH] balance query error:', e.message);
+    }
+}
+
+// ===== 桌宠本地 HTTP 服务 =====
+function startDshPetServer() {
+    const server = http.createServer(async (req, res) => {
+        const send = (code, obj) => {
+            res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(obj));
+        };
+        const url = new URL(req.url, `http://127.0.0.1:${dshPetPort}`);
+        if (req.method === 'GET' && url.pathname === '/dsh/status') {
+            dshPetStatesCache = getPetStates();
+            return send(200, { petName: '桌宠', states: dshPetStatesCache, dsh: petDshState });
+        }
+        if (req.method === 'POST' && url.pathname === '/dsh/message') {
+            let body = '';
+            req.on('data', c => { body += c; if (body.length > 2e6) req.destroy(); });
+            req.on('end', () => {
+                try { acceptDshMessage(JSON.parse(body || '{}')); }
+                catch (e) { console.warn('[DSH] 消息解析失败:', e.message); }
+                send(200, { ok: true });
+            });
+            return;
+        }
+        send(404, { ok: false, error: 'not found' });
+    });
+    server.on('error', (e) => console.warn('[DSH] 桌宠本地服务启动失败:', e.message));
+    server.listen(dshPetPort, '127.0.0.1', () => console.log(`[DSH] 桌宠状态服务已启动 http://127.0.0.1:${dshPetPort}`));
+}
+
+// ===== DSH 相关 IPC =====
+ipcMain.handle('dsh-get-status', () => petDshState);
+ipcMain.handle('dsh-send-task', async (event, message, opts) => {
+    if (!message || !String(message).trim()) return { ok: false, error: 'empty' };
+    return postJsonToDsh('/send', { message: String(message).trim(), sessionId: (opts && opts.sessionId) || undefined });
 });
+ipcMain.handle('dsh-cancel-task', async () => postJsonToDsh('/cancel', {}));
+// ask_user 工具回传：浮窗弹窗用户选择 → 转给插件 /ask/result
+ipcMain.on('dsh-ask-respond', (event, answer, index, canceled) => {
+    postJsonToDsh('/ask/result', { answer: String(answer == null ? '' : answer), index: Number(index), canceled: !!canceled });
+});
+// 系统统计 + DeepSeek 峰谷时段（供贴图下方信息条展示）
+// CPU 温度尽力而为（Windows 下尝试 wmic 热区，非所有机器可用，失败返回 null）
+function probeCpuTemp() {
+    return new Promise((resolve) => {
+        if (process.platform !== 'win32') return resolve(null);
+        const { execFile } = require('child_process');
+        execFile('wmic', ['/namespace:\\\\root\\wmi', 'PATH', 'MSAcpi_ThermalZoneTemperature', 'get', 'CurrentTemperature', '/value'],
+            { timeout: 1500, windowsHide: true },
+            (err, stdout) => {
+                if (err) return resolve(null);
+                const m = /CurrentTemperature=(\d+)/.exec(stdout || '');
+                if (!m) return resolve(null);
+                const kelvin10 = parseInt(m[1], 10);
+                if (!kelvin10) return resolve(null);
+                const c = (kelvin10 / 10) - 273.15;
+                resolve(Math.round(c));
+            });
+    });
+}
+// CPU 占用：Windows 上 os.loadavg 恒为 0，PowerShell CIM 的 LoadPercentage 多核/空闲时又常返回空，
+// 统一改用 os.cpus() 时间片差值采样（跨平台、零依赖、无子进程开销）。
+// get-system-stats 每 5s 轮询一次，差值窗口即两次采样间隔；首次调用返回 0（无基线）。
+let lastCpuSample = null;
+function probeCpuPct() {
+    return new Promise((resolve) => {
+        const os = require('os');
+        const cpus = os.cpus && os.cpus() ? os.cpus() : [];
+        if (!cpus.length) return resolve(0);
+        let idle = 0, total = 0;
+        for (const c of cpus) {
+            for (const key in c.times) total += c.times[key];
+            idle += c.times.idle;
+        }
+        const prev = lastCpuSample;
+        lastCpuSample = { idle, total };
+        if (!prev || total <= prev.total) return resolve(0); // 首次采样或时钟回拨
+        const dIdle = idle - prev.idle;
+        const dTotal = total - prev.total;
+        resolve(dTotal > 0 ? Math.min(100, Math.max(0, Math.round((1 - dIdle / dTotal) * 100))) : 0);
+    });
+}
+ipcMain.handle('get-system-stats', async () => {
+    try {
+        const os = require('os');
+        const totalmem = os.totalmem ? os.totalmem() : 0;
+        const freemem = os.freemem ? os.freemem() : 0;
+        const memPct = totalmem > 0 ? Math.round((1 - freemem / totalmem) * 100) : 0;
+        const cpuPct = await probeCpuPct();
+        const tempC = await probeCpuTemp();
+        return {
+            cpuPct,
+            memPct,
+            tempC,
+            memUsedGB: totalmem > 0 ? Number(((totalmem - freemem) / 1024 / 1024 / 1024).toFixed(1)) : 0,
+            memTotalGB: totalmem > 0 ? Number((totalmem / 1024 / 1024 / 1024).toFixed(1)) : 0,
+            ratePeriod: ratePeriodNow()
+        };
+    } catch (e) {
+        return { cpuPct: 0, memPct: 0, tempC: null, memUsedGB: 0, memTotalGB: 0, ratePeriod: { period: 'peak', label: '高峰时段', factor: 1 } };
+    }
+});
+ipcMain.on('dsh-set-plugin-port', (event, port) => {
+    const n = parseInt(port, 10);
+    if (n > 0 && n < 65536) {
+        dshPluginPort = n;
+        unifiedConfig.dsh = { ...(unifiedConfig.dsh || {}), pluginPort: n };
+        saveUnifiedConfig();
+        console.log('[DSH] 插件端口已更新:', n);
+    }
+});
+ipcMain.on('dsh-set-enabled', (event, enabled) => {
+    dshEnabled = !!enabled;
+    unifiedConfig.dsh = { ...(unifiedConfig.dsh || {}), enabled: dshEnabled };
+    saveUnifiedConfig();
+    console.log('[DSH] 联动开关:', dshEnabled);
+});
+
+// 设置面板「模拟推送」按钮：让桌宠看到一轮 DSH 状态推送。
+// 分两条链路并行走：
+//   1. 桌宠本地直接广播（不依赖插件，立即验证覆盖状态机 + 环节贴图配置）
+//   2. 若插件在线，同时让其 /test-state 模拟真实推送（验证插件 → 桌宠通道）
+ipcMain.handle('dsh-test-state', async () => {
+    const local = simulatePetStates();
+    let plugin = null;
+    if (petDshState.pluginReachable) {
+        plugin = await postJsonToDsh('/test-state', {}).then(r => ({ ok: r.ok, data: r.data }));
+    }
+    return { ok: true, local: true, plugin };
+});
+
+// 桌宠本地模拟一轮 DSH 状态推送：think → cmd → read → grep → done → idle
+async function simulatePetStates() {
+    const cats = ['think', 'cmd', 'read', 'grep', 'done'];
+    for (const c of cats) {
+        sendToAllWindows('dsh-message', {
+            event: 'test/send', category: c, agentStatus: 'running',
+            task: '【测试】模拟状态推送', tool: c,
+            todolist: [{ text: '模拟推送 ' + c + ' 环节', status: 'running' }],
+            totals: petDshState.totals, pluginReachable: true
+        });
+        await new Promise((r) => setTimeout(r, 400));
+    }
+    // 先应用「任务完成」贴图（覆盖保持），再退出覆盖恢复随机状态机
+    sendToAllWindows('dsh-message', {
+        event: 'test/done', category: 'done', agentStatus: 'running', task: '【测试】模拟状态推送'
+    });
+    await new Promise((r) => setTimeout(r, 600));
+    sendToAllWindows('dsh-message', { event: 'test/idle', agentStatus: 'idle', task: '' });
+}
+
+// 点击贴图下方信息条：唤起 DSH
+//  - 插件端口可达（DSH 已在运行）→ 尝试把 DSH 主窗口带到前台，不重复启动
+//  - 插件不可达 → 新开终端启动 dsh（命令可用 unifiedConfig.dsh.launchCmd 自定义，默认 npx @deepseek-ai/dsh web）
+function launchDsh() {
+    const probe = () => fetch(dshPluginBase() + '/status', { signal: AbortSignal.timeout(1500) })
+        .then(r => r.ok).catch(() => false);
+    probe().then(ok => {
+        if (ok) {
+            focusDshWindow();
+            return;
+        }
+        const cmd = (unifiedConfig && unifiedConfig.dsh && unifiedConfig.dsh.launchCmd) || 'npx @deepseek-ai/dsh web';
+        spawnDsh(cmd);
+    });
+}
+function spawnDsh(cmd) {
+    try {
+        if (process.platform === 'win32') {
+            // 新开一个标题为「DSH」的控制台窗口执行 dsh（保留窗口 /k），启动后与桌宠进程解耦；
+            // 固定标题便于之后点状态栏时稳定聚焦该窗口
+            spawn(process.env.ComSpec || 'cmd.exe', ['/c', 'start', 'DSH', 'cmd.exe', '/k', cmd],
+                { detached: true, stdio: 'ignore' }).unref();
+        } else if (process.platform === 'darwin') {
+            spawn('osascript', ['-e', 'tell application "Terminal" to do script "' + cmd + '"'],
+                { detached: true, stdio: 'ignore' }).unref();
+        } else {
+            spawn('x-terminal-emulator', ['-e', 'bash', '-lc', cmd],
+                { detached: true, stdio: 'ignore' }).unref();
+        }
+        console.log('[DSH] DSH launched in new terminal:', cmd);
+    } catch (e) {
+        console.error('[DSH] launch failed:', e);
+    }
+}
+// 尝试把已运行的 DSH 窗口带到最前并聚焦（恢复最小化 + 激活前台；匹配不到则静默忽略）
+function focusDshWindow() {
+    try {
+        if (process.platform === 'win32') {
+            // 匹配标题/进程名含 dsh|deepseek 的可见主窗口；ShowWindowAsync(SW_RESTORE=9) 恢复最小化，
+            // 再用 AppActivate 置前台。我们自启动的 DSH 终端窗口标题固定为「DSH」，可稳定命中。
+            const ps = 'Add-Type -TypeDefinition \'using System;using System.Runtime.InteropServices;' +
+                'public class PetLinkWin{[DllImport("user32.dll")]public static extern bool ShowWindowAsync(IntPtr h,int c);}\';' +
+                '$p=get-process | where { $_.MainWindowHandle -ne 0 -and ' +
+                '($_.MainWindowTitle -match \'dsh\' -or $_.MainWindowTitle -match \'deepseek\' -or $_.ProcessName -match \'dsh\') } | select -first 1;' +
+                'if($p){[PetLinkWin]::ShowWindowAsync($p.MainWindowHandle,9);' +
+                '(New-Object -ComObject WScript.Shell).AppActivate($p.Id)}';
+            spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], { detached: true, stdio: 'ignore' }).unref();
+        } else if (process.platform === 'darwin') {
+            spawn('osascript', ['-e', 'tell application "System Events" to set frontmost of first process whose name contains "dsh" to true'],
+                { detached: true, stdio: 'ignore' }).unref();
+        } else {
+            spawn('wmctrl', ['-a', 'dsh'], { detached: true, stdio: 'ignore' }).unref();
+        }
+    } catch (e) { /* 聚焦失败不阻塞 */ }
+}
+ipcMain.on('dsh-launch', () => { launchDsh(); });
+
+// 启动 DSH 联动（whenReady 中调用）
+function startDshLink() {
+    const c = unifiedConfig && unifiedConfig.dsh;
+    if (c) {
+        if (c.enabled != null) dshEnabled = !!c.enabled;
+        if (c.petPort) dshPetPort = parseInt(c.petPort, 10) || DSH_DEFAULT_PET_PORT;
+        if (c.pluginPort) dshPluginPort = parseInt(c.pluginPort, 10) || DSH_DEFAULT_PLUGIN_PORT;
+    }
+    startDshPetServer();
+    // 先探测一次插件是否在线，再每 10 秒巡检
+    probeDshPlugin();
+    setInterval(probeDshPlugin, 10 * 1000);
+    // 每 5 分钟刷新一次余额
+    refreshDshBalance();
+    setInterval(refreshDshBalance, 5 * 60 * 1000);
+    console.log('[DSH] 联动模块已启动 (petPort=' + dshPetPort + ', pluginPort=' + dshPluginPort + ', enabled=' + dshEnabled + ')');
+}
 
 // 屏幕捕获与分析（按提供商路由：deepseek / zhipu）
 ipcMain.handle('capture-screen', async (event, recentMessages) => {
@@ -3751,6 +4192,9 @@ app.whenReady().then(() => {
     loadUnifiedConfig();
     // 把统一配置回灌到主进程运行状态，避免 index/浮窗启动时广播旧默认值把设置改回默认
     hydrateRuntimeFromUnified();
+
+    // DSH 联动（deepseek-harness 插件通信 / 任务面板 / 余额）
+    startDshLink();
 
     // 默认启动浮窗（桌宠）为打开即见的首要窗口；
     // 主窗口 index.html（家里）降级为次要窗口，由浮窗"回家"按钮唤起

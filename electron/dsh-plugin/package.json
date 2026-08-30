@@ -1,0 +1,17 @@
+{
+  "name": "dsh-pet-link",
+  "version": "0.1.0",
+  "description": "桌宠小屋 ↔ DeepSeek Harness 联动插件：把 DSH 任务状态（todolist/输出/usage/余额）推送给桌宠，并支持桌宠直接派发/取消任务",
+  "type": "module",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "cordis.patch.yml"
+  ],
+  "dependencies": {},
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

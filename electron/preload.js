@@ -2,9 +2,6 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 // 主窗口的 preload
 contextBridge.exposeInMainWorld('electronAPI', {
-    // 恢复主窗口
-    restoreMainWindow: () => ipcRenderer.send('restore-main-window'),
-
     // 开机自启动（设置面板"开机自启"开关）
     setLoginItem: (enabled) => ipcRenderer.send('set-login-item', enabled),
 
@@ -287,4 +284,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openStickerFolder: () => ipcRenderer.send('open-img-folder'),
     // 扫描当前贴图包内 mood_*/浮窗_* 贴图（模块化提示词 & 新状态）
     getPackAssets: () => ipcRenderer.invoke('get-pack-assets'),
+
+    // ===== DSH 联动（deepseek-harness dsh-pet-link 插件）=====
+    // 获取聚合状态（agent 状态 / todolist / 输出 / usage / 余额）
+    dshGetStatus: () => ipcRenderer.invoke('dsh-get-status'),
+    // 向 DSH 派发任务（由 dsh-pet-link 插件接收并交给 agent 执行）
+    dshSendTask: (message, opts) => ipcRenderer.invoke('dsh-send-task', message, opts),
+    // 取消 DSH 当前任务
+    dshCancelTask: () => ipcRenderer.invoke('dsh-cancel-task'),
+    // ask_user 工具：把浮窗弹窗的用户选择回传给插件
+    dshAskRespond: (answer, index, canceled) => ipcRenderer.send('dsh-ask-respond', answer, index, canceled),
+    // 系统统计 + DeepSeek 峰谷时段（贴图下方信息条）
+    getSystemStats: () => ipcRenderer.invoke('get-system-stats'),
+    // 设置插件端口（设置面板）
+    dshSetPluginPort: (port) => ipcRenderer.send('dsh-set-plugin-port', port),
+    dshSetEnabled: (enabled) => ipcRenderer.send('dsh-set-enabled', enabled),
+    // 点击贴图下方信息条：唤起 / 启动 DSH（主进程决定聚焦已有窗口或新开终端）
+    dshLaunch: () => ipcRenderer.send('dsh-launch'),
+    // 设置面板「模拟推送」：让插件模拟向桌宠推送一轮状态（验证通信链路与环节贴图覆盖）
+    dshTestState: (opts) => ipcRenderer.invoke('dsh-test-state', opts),
+    // 接收插件推送（说话 / 切贴图 / todolist / 输出）
+    onDshMessage: (callback) => ipcRenderer.on('dsh-message', (event, payload) => callback(payload)),
 });

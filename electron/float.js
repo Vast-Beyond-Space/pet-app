@@ -103,6 +103,21 @@ const PET_IMGS = {};
 let petState = 'wandering'; // wandering | eating | daydreaming | working | angry | craving | eating_cookie | sleeping
 let petStateTimer = null;
 
+// DSH 覆盖状态机：任务运行中时暂停随机状态机，由 DSH 环节推送决定贴图（设置里可关）
+let dshOverrideActive = false;
+function setDshOverrideActive(on) {
+    dshOverrideActive = on;
+    if (on) {
+        if (petStateTimer) { clearTimeout(petStateTimer); petStateTimer = null; }
+        if (typeof pauseWander === 'function') pauseWander();
+    } else {
+        // 恢复随机状态机（稍迟半步，避免与 DSH 空闲推送争抢）
+        setTimeout(() => {
+            if (!dshOverrideActive && typeof randomStateTransition === 'function') randomStateTransition();
+        }, 1200);
+    }
+}
+
 // 行为保持概率（60%维持当前行为，40%切换），可在开发者模式调整
 let behaviorKeepProbability = 0.6;
 
@@ -611,8 +626,37 @@ function applyPackAssets(a) {
         initCollapsibleGroups();
         renderChainPicker();
         renderStateConfig();
+        try { fillOverrideSelects(); } catch (e) { console.warn('[float] fillOverrideSelects:', e); }
     }
     packAssetKey = key;
+}
+// DSH 联动 → 环节贴图状态：六个环节（思考/命令/读取/查找/完成/失败）各配一个状态下拉。
+// 选项直接复用【状态】设置的同源列表 selectableStates()（现场注册的贴图原名，含陌生贴图），
+// 渲染时机跟随 renderStateConfig：状态注册/新增贴图后两者一起刷新，永远一致。
+function fillOverrideSelects() {
+    const OVR_EL_KEYS = { think: 'dshStateThink', cmd: 'dshStateCmd', read: 'dshStateRead', grep: 'dshStateGrep', done: 'dshStateDone', error: 'dshStateError' };
+    const ovr = (config && config.dsh && config.dsh.override) || {};
+    const stateMap = ovr.states || {};
+    const opts = selectableStates();
+    // 调试日志：一次即可，确认下拉确实被填充（经主进程转发打印）
+    const sel = document.getElementById('dshStateThink');
+    if (sel && window.electronAPI && window.electronAPI.logToMain && !window.__dshOvrLogDone) {
+        window.__dshOvrLogDone = true;
+        window.electronAPI.logToMain('info', '[float:settings] dsh override selects: states=' + opts.length + ' options=[' + opts.join(',') + ']');
+    }
+    Object.keys(OVR_EL_KEYS).forEach(k => {
+        const el = document.getElementById(OVR_EL_KEYS[k]);
+        if (!el) return;
+        el.innerHTML = '<option value="">不覆盖</option>' + opts.map(s =>
+            '<option value="' + escapeHtml(s) + '"' + (stateMap[k] === s ? ' selected' : '') + '>' + escapeHtml(s) + '</option>'
+        ).join('');
+        if (!stateMap[k]) el.value = '';
+        el.onchange = () => {
+            const o = (config && config.dsh && config.dsh.override) || {};
+            config.dsh = { ...(config.dsh || {}), override: { enabled: true, states: {}, ...o, states: { ...(o.states || {}), [k]: el.value } } };
+            if (window.electronAPI && window.electronAPI.syncConfig) window.electronAPI.syncConfig(config);
+        };
+    });
 }
 // 加载图包资产：注册动态状态 + 刷新心情 + 刷新设置面板
 function loadPackAssets() {
@@ -1573,6 +1617,8 @@ function renderStateConfig() {
         const opts = first ? Array.from(first.options).map(o => o.value) : [];
         window.electronAPI.logToMain('info', '[float:settings] stateFx rows=' + states.length + ' loopOptions=[' + opts.join(',') + ']');
     }
+    // DSH 环节贴图下拉与【状态】设置同源同帧渲染，保证两者列表永远一致
+    fillOverrideSelects();
 }
 
 // ===== 记忆设置：列出 / 添加 / 删除（支持关键字过滤 + 分页 + 图像记忆 + 最新优先）=====
@@ -1872,6 +1918,12 @@ const BUBBLE_SHOW_DISTANCE = 120;
 const HOVER_STOP_DISTANCE = 150;
 
 let isMouseHovering = false;
+// 鼠标靠近（四按钮气泡显示）时，DSH 任务面板自动隐藏，避免遮挡四按钮
+let taskPanelHovering = false;
+// 由 initDshLink 注册：鼠标靠近/离开时切换任务面板显隐
+let applyTaskPanelHover = null;
+// 由 initDshLink 注册：任务面板配置变化时触发重渲染（设置窗口改动 → 浮窗实时生效）
+let refreshDshPanel = null;
 // 用窗口真实屏幕位置初始化，而非硬编码“屏幕右下角”。窗口由主进程居中创建，
 // 若用旧值会导致 lastWindowX/Y 与窗口实际位置脱节，重力物理一启动就把窗口拉到底部/出屏。
 let lastWindowX = (typeof window.screenX === 'number' && Number.isFinite(window.screenX)) ? window.screenX : screenX;
@@ -1920,6 +1972,11 @@ if (isSettingsMode) {
     chatContainer.style.width = '100%';
     chatContainer.style.height = '100%';
     floatChatInput.focus();
+    // 聊天模式隐藏下方信息条（DSH 连接 / 硬件监控 / 峰谷时段）
+    const chatPetStatBar = document.getElementById('petStatBar');
+    if (chatPetStatBar) chatPetStatBar.style.display = 'none';
+    // CSS 硬兜底：聊天模式下信息条永不显示（防止任何路径重新显示）
+    document.body.classList.add('chat-mode');
 
     // FIX: 聊天窗口为无边框透明窗口，保留顶部标题栏作为拖动区域
     const chatHeader = document.querySelector('.chat-header');
@@ -2108,6 +2165,9 @@ if (isSettingsMode) {
         } else {
             floatBubble.classList.remove('show');
         }
+        // 鼠标靠近（四按钮显示）时隐藏 DSH 任务面板，避免遮挡
+        taskPanelHovering = dist < BUBBLE_SHOW_DISTANCE;
+        if (applyTaskPanelHover) applyTaskPanelHover(taskPanelHovering);
 
         const wasHovering = isMouseHovering;
         isMouseHovering = dist < HOVER_STOP_DISTANCE;
@@ -2153,6 +2213,8 @@ if (isSettingsMode) {
         if (isMouseHovering) {
             isMouseHovering = false;
             floatBubble.classList.remove('show');
+            taskPanelHovering = false;
+            if (applyTaskPanelHover) applyTaskPanelHover(false);
             if (!isParabolaRunning) {
                 resumeWander();
             }
@@ -2241,14 +2303,6 @@ if (isSettingsMode) {
         }
         return null;
     }
-
-    // 双击恢复主窗口
-    floatPet.addEventListener('dblclick', (e) => {
-        e.stopPropagation();
-        if (window.electronAPI) {
-            window.electronAPI.restoreMainWindow();
-        }
-    });
 
     // 单击触发随机特效
     const effects = ['bounce', 'shake', 'hearts', 'stars'];
@@ -3019,6 +3073,8 @@ if (isSettingsMode) {
 
     // 随机状态切换（所有非饼干状态都可参与）
     function randomStateTransition() {
+        // DSH 任务运行覆盖期间暂停随机状态机（由 setDshOverrideActive 恢复）
+        if (dshOverrideActive) return;
         if (isDragging || cookieState.active) {
             // 拖拽或饼干期间触发切换：不能直接放弃，否则该阻塞状态将无定时器可推进而永久卡死。
             // 稍后重试，拖拽/饼干恢复后即可继续推进状态机。
@@ -3297,6 +3353,8 @@ if (isSettingsMode) {
         // 1) 鼠标悬停标志超时自愈：长时间没有鼠标事件却仍标记悬停 → 解除并恢复游荡
         if (isMouseHovering && Date.now() - lastPetMouseEvent > 1200) {
             isMouseHovering = false;
+            taskPanelHovering = false;
+            if (applyTaskPanelHover) applyTaskPanelHover(false);
             if (floatBubble) floatBubble.classList.remove('show');
         }
         if (isDragging || isMouseHovering || isParabolaRunning || cookieState.active || isChatMode) return;
@@ -3316,6 +3374,8 @@ if (isSettingsMode) {
             isDragging = false;
             stopPendulum();
             isMouseHovering = false;
+            taskPanelHovering = false;
+            if (applyTaskPanelHover) applyTaskPanelHover(false);
             if (floatBubble) floatBubble.classList.remove('show');
             if (pausedEatingOnDrag) {
                 pausedEatingOnDrag = false;
@@ -5219,6 +5279,8 @@ if (window.electronAPI && window.electronAPI.onConfigUpdated) {
         }
         // 持久化到 localStorage，避免刷新后丢失
         localStorage.setItem('petConfig', JSON.stringify(config));
+        // 任务面板配置变化 → 浮窗实时重渲染（高度/字号/内容/位置）
+        if (data.dshPanel !== undefined && refreshDshPanel) refreshDshPanel();
         // 若当前是设置面板模式，刷新控件显示值（不重新绑定事件）
         if (isSettingsMode) {
             refreshSettingsValues();
@@ -5256,6 +5318,18 @@ function removeEmoji(text) {
 }
 
 // float.js - speakText（剔除 mood 标记后朗读）
+// 当前正在播放的 TTS 句柄（{ ctx, source }），新回复朗读前自动停止上一个
+let __ttsCurrent = null;
+
+// 停止当前正在播放的 TTS（若正在播）
+function stopCurrentTts() {
+    if (!__ttsCurrent) return;
+    const { ctx, source } = __ttsCurrent;
+    __ttsCurrent = null;
+    try { source.stop(); } catch (e) {}
+    try { ctx.close(); } catch (e) {}
+}
+
 async function speakText(text) {
     if (!text) return;
 
@@ -5287,6 +5361,8 @@ async function speakText(text) {
 
     if (window.electronAPI && window.electronAPI.speakText) {
         try {
+            // 新回复即将朗读，先停止上一个仍在播放的 TTS
+            stopCurrentTts();
             const audioB64 = await window.electronAPI.speakText(clean, voiceToUse);
             if (audioB64) {
                 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -5303,6 +5379,13 @@ async function speakText(text) {
                 source.buffer = audioBuffer;
                 source.connect(gainNode);
                 gainNode.connect(audioCtx.destination);
+                // 记录当前播放句柄，供下一次朗读时自动停止
+                __ttsCurrent = { ctx: audioCtx, source };
+                source.onended = () => {
+                    if (__ttsCurrent && __ttsCurrent.source === source) {
+                        __ttsCurrent = null;
+                    }
+                };
                 source.start();
                 return;
             }
@@ -5322,4 +5405,704 @@ if (!isSettingsMode && window.electronAPI && window.electronAPI.on) {
         }
     });
 }
+
+// ============================================================
+// ===== DSH 联动（deepseek-harness dsh-pet-link 插件）=====
+// 桌宠侧行为：
+//   1. 插件在每个细分任务完成后推送 { say, state, ... } → 桌宠说话 + 切换贴图
+//   2. 任务运行时在窗口角落显示「DSH 任务面板」：todolist + 点击展开实时输出（思维链/工具）
+//   3. 设置面板提供：开关 / 插件端口 / 派发任务 / 取消 / 状态监控
+// ============================================================
+(function initDshLink() {
+    if (!window.electronAPI) return;
+
+    // 贴图下方信息条（fixed 于窗口底部，显示时通过 --pet-stat-h 把贴图/按钮顶上去；
+    // 可点击：点击唤起/启动 DSH）
+    const dshBaseStyle = document.createElement('style');
+    dshBaseStyle.textContent =
+        '#petStatBar{position:fixed;left:50%;transform:translateX(-50%);bottom:6px;width:max-content;max-width:calc(100vw - 16px);' +
+        'background:rgba(20,24,38,.78);color:#dfe4f2;border:1px solid rgba(120,132,255,.25);border-radius:8px;' +
+        'padding:3px 10px;font-size:10px;line-height:1.6;text-align:center;white-space:normal;word-break:break-all;' +
+        'pointer-events:auto;cursor:pointer;z-index:998;backdrop-filter:blur(2px);box-sizing:border-box;' +
+        'transition:border-color .15s ease;}' +
+        '#petStatBar:hover{border-color:rgba(120,132,255,.65);}' +
+        // 聊天模式硬兜底：聊天窗口里信息条永不显示（JS 隐藏 + 类名双保险）
+        'body.chat-mode #petStatBar{display:none !important;}';
+    document.head.appendChild(dshBaseStyle);
+    // 点击信息条：唤起 / 启动 DSH（主进程决定聚焦已有窗口或新开终端）
+    const petStatBarEl = document.getElementById('petStatBar');
+    if (petStatBarEl) {
+        petStatBarEl.title = '点击唤起 / 启动 DSH';
+        petStatBarEl.addEventListener('click', () => {
+            if (window.electronAPI && window.electronAPI.dshLaunch) window.electronAPI.dshLaunch();
+        });
+    }
+
+    // 当前聚合状态（主进程缓存被推送后的最新值）
+    let dshLive = {
+        pluginReachable: false, agentStatus: 'unknown', task: '', todolist: [], output: [], minds: [],
+        lastTool: '', totals: { tokens: 0, cost: 0, cacheHit: 0, cacheMiss: 0 }, balance: null, updatedAt: null
+    };
+
+    function fmtNum(n) {
+        if (n == null) return '0';
+        if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+        return String(n);
+    }
+
+    function balanceText() {
+        const b = dshLive.balance;
+        if (b && Array.isArray(b.balance_infos) && b.balance_infos.length) {
+            const infos = b.balance_infos.map(i => `${i.currency} ${i.total_balance}`).join(' / ');
+            return `${b.is_available ? '可用' : '余额不足'}：${infos}`;
+        }
+        return '余额未知（需配置 API Key）';
+    }
+
+    function hitRateText() {
+        const t = dshLive.totals;
+        const total = t.cacheHit + t.cacheMiss;
+        return total > 0 ? ((t.cacheHit / total) * 100).toFixed(1) + '%' : '—';
+    }
+
+    // ---------- 非设置窗口：角落任务面板（可配置：高度 / 字号 / 显示内容 / 距贴图距离）----------
+    let panelEl = null, panelOpen = false;
+    // 任务面板配置（设置 → DSH 联动 → 任务面板设置）
+    function dshPanelCfg() {
+        const c = (config && config.dshPanel) || {};
+        return {
+            height: (Number(c.height) > 0) ? Number(c.height) : null, // null = 自动（限高不超出窗口）
+            fontSize: (Number(c.fontSize) >= 10) ? Number(c.fontSize) : 12,
+            offset: (Number(c.offset) >= 0) ? Number(c.offset) : 16,   // 距贴图上方距离(px)
+            hoverGap: (Number(c.hoverGap) >= 0) ? Number(c.hoverGap) : 14, // 悬停时面板底边距下方监控栏的距离(px)
+            buttonGap: (Number(c.buttonGap) >= 0) ? Number(c.buttonGap) : 10, // 悬停时面板上边距四按钮气泡的距离(px)
+            showMinds: c.showMinds !== undefined ? c.showMinds !== false : (config ? config.dshShowMinds !== false : true),
+            showTask: c.showTask !== false,
+            showTodo: c.showTodo !== false,
+            showOutput: c.showOutput !== false,
+            showStats: c.showStats !== false,
+        };
+    }
+    // 设置面板里的实时预览：渲染示意框，展示面板常规位置与鼠标靠近时的下移位置，
+    // 以及与四按钮气泡、下方监控栏的相对关系
+    function renderDshPanelPreview() {
+        const el = document.getElementById('dshPanelPreview');
+        if (!el) return;
+        const cfg = dshPanelCfg();
+        const W = el.clientWidth || 200, H = el.clientHeight || 150;
+        const scale = H / 200; // 预览高度对应实际窗口高（约 200px）的比例
+        const panelW = Math.round(W * 0.7);
+        const panelLeft = W - panelW - 8;            // 面板右对齐
+        const petH = Math.round(H * 0.3);
+        const petW = Math.round(petH * 0.7);
+        const petLeft = Math.round((W - petW) / 2);
+        const barH = 10;                              // 下方监控栏示意
+        const petTop = H - barH - 4 - petH;           // 桌宠顶部（监控栏上方）
+        const bubbleH = Math.round(20 * scale);       // 四按钮气泡示意
+        const bubbleBottom = petTop + 4;              // 气泡底边（桌宠头上方）
+        // 常规位置：面板底边 = 桌宠上方 offset
+        const normalBottom = petTop + Math.round(cfg.offset * scale);
+        const normalH = Math.round(34 * scale);
+        const normalTop = normalBottom + normalH;
+        // 悬停位置：面板底边 = 监控栏上方 hoverGap，高度压到气泡底边之下留 buttonGap
+        const hoverBottom = barH + Math.round(cfg.hoverGap * scale);
+        const hoverMaxH = Math.max(0, Math.round(bubbleBottom - hoverBottom - Math.max(6, cfg.buttonGap * scale)));
+        const hoverH = Math.round(26 * scale);
+        const hoverTop = hoverBottom + hoverH;
+        el.innerHTML =
+            // 下方监控栏
+            '<div style="position:absolute;left:4px;right:4px;bottom:2px;height:' + barH + 'px;border-radius:3px;' +
+            'background:rgba(20,24,38,.5);color:#dfe4f2;font-size:9px;line-height:' + barH + 'px;text-align:center;">监控栏</div>' +
+            // 桌宠
+            '<div style="position:absolute;left:' + petLeft + 'px;bottom:' + (barH + 4) + 'px;width:' + petW + 'px;height:' + petH + 'px;' +
+            'border-radius:12px 12px 6px 6px;background:#ffd9a0;border:1px solid #e0b57a;box-sizing:border-box;"></div>' +
+            // 四按钮气泡
+            '<div style="position:absolute;left:' + Math.round((W - 70) / 2) + 'px;bottom:' + bubbleBottom + 'px;width:70px;height:' + bubbleH + 'px;' +
+            'border-radius:6px;background:rgba(120,132,255,.35);border:1px dashed #6a74c9;color:#3a3f6b;font-size:9px;' +
+            'line-height:' + bubbleH + 'px;text-align:center;box-sizing:border-box;">四按钮</div>' +
+            // 常规位置面板（半透明描边）
+            '<div style="position:absolute;left:' + panelLeft + 'px;top:' + normalTop + 'px;width:' + panelW + 'px;height:' + normalH + 'px;' +
+            'border-radius:8px;background:rgba(30,34,48,.15);border:1.5px dashed #8b95c9;color:#5a6390;box-sizing:border-box;padding:3px 6px;' +
+            'font-size:9px;display:flex;flex-direction:column;justify-content:center;">常规（距贴图 ' + cfg.offset + 'px）</div>' +
+            // 悬停位置面板（实心，夹在四按钮与监控栏之间）
+            '<div style="position:absolute;left:' + panelLeft + 'px;bottom:' + hoverBottom + 'px;width:' + panelW + 'px;height:' + hoverH + 'px;' +
+            'border-radius:8px;background:rgba(30,34,48,.92);color:#fff;box-sizing:border-box;padding:3px 6px;' +
+            'display:flex;flex-direction:column;justify-content:center;gap:1px;font-size:9px;">' +
+            '<div style="font-weight:600;">悬停位置</div>' +
+            '<div style="opacity:.8;">距监控栏 ' + cfg.hoverGap + 'px · 上限 ' + hoverMaxH + 'px</div>' +
+            '</div>';
+    }
+    // 应用面板尺寸 / 字号 / 位置（CSS 变量 + max-height）
+    function applyDshPanelStyle() {
+        if (!panelEl) return;
+        const cfg = dshPanelCfg();
+        // 面板上边缘随位置变化而变：max-height 精确到「窗口高 - 面板底边位置」，
+        // 保证拉到最高时上边缘恰好顶到窗口顶部，不会被窗口截断
+        const cap = 'calc(100vh - var(--float-pet-bottom,4px) - var(--float-pet-size,80px) - var(--dsh-panel-offset,16px))';
+        panelEl.style.maxHeight = cfg.height ? `min(${cfg.height}px, ${cap})` : cap;
+        panelEl.style.setProperty('--dsh-panel-font', cfg.fontSize + 'px');
+        panelEl.style.setProperty('--dsh-panel-offset', cfg.offset + 'px');
+    }
+    // 面板显隐/位移：收起态隐藏；展开态不隐藏。鼠标靠近（四按钮气泡显示）时，
+    // 面板下移到「监控栏上方留 hoverGap」，并把高度上限压到「四按钮底边之下留 buttonGap」，
+    // 从数学上保证与四按钮、下方监控栏都不接触，且仍可交互；离开返回原位置。
+    function applyPanelVisibility() {
+        if (!panelEl) return;
+        panelEl.classList.toggle('dsh-hide', !panelOpen);
+        if (!taskPanelHovering) {
+            panelEl.style.bottom = '';
+            panelEl.style.maxHeight = '';
+            applyDshPanelStyle();
+            return;
+        }
+        const cfg = dshPanelCfg();
+        const rs = getComputedStyle(document.documentElement);
+        const petBottom = parseFloat(rs.getPropertyValue('--float-pet-bottom')) || 4;
+        const petSize = parseFloat(rs.getPropertyValue('--float-pet-size')) || 80;
+        const statH = parseFloat(rs.getPropertyValue('--pet-stat-h')) || 0; // 监控栏高+4（显示时才有值）
+        const barTop = statH + 2;                                  // 监控栏顶部距窗口底
+        const panelBottom = barTop + cfg.hoverGap;                 // 面板底边：监控栏上方留 hoverGap
+        const buttonBottom = petBottom + petSize + 6 + statH;      // 四按钮气泡底边
+        const maxH = Math.max(0, Math.round(buttonBottom - panelBottom - cfg.buttonGap));
+        panelEl.style.bottom = Math.round(panelBottom) + 'px';
+        panelEl.style.maxHeight = maxH + 'px';
+    }
+    function ensurePanel() {
+        if (panelEl || document.getElementById('dshTaskPanel')) return;
+        const style = document.createElement('style');
+        style.textContent =
+            '#dshTaskPanel{position:fixed;right:14px;bottom:calc(var(--float-pet-bottom,4px) + var(--float-pet-size,80px) + var(--dsh-panel-offset,16px));z-index:99999;width:300px;max-width:calc(100vw - 28px);' +
+            'background:rgba(30,34,48,.94);color:#e8eaf2;border:1px solid rgba(120,132,255,.35);border-radius:12px;' +
+            'box-shadow:0 8px 30px rgba(0,0,0,.35);font-size:var(--dsh-panel-font,12px);line-height:1.7;overflow-y:auto;' +
+            'scrollbar-width:none;' +
+            'backdrop-filter:blur(4px);transform-origin:bottom right;transition:transform .18s ease,opacity .18s ease,bottom .18s ease;}' +
+            '#dshTaskPanel::-webkit-scrollbar{display:none;}' +
+            '#dshTaskPanel.dsh-hide{transform:scale(.6);opacity:0;pointer-events:none;}' +
+            '#dshTaskPanel .dsh-head{display:flex;align-items:center;gap:8px;padding:9px 11px;cursor:pointer;' +
+            'background:linear-gradient(90deg,rgba(120,132,255,.16),transparent);}' +
+            '#dshTaskPanel .dsh-dot{width:9px;height:9px;border-radius:50%;flex:none;}' +
+            '#dshTaskPanel .dsh-title{flex:1;font-weight:600;}' +
+            '#dshTaskPanel .dsh-toggle{opacity:.7;}' +
+            '#dshTaskPanel .dsh-body{padding:8px 11px 10px;}' +
+            '#dshTaskPanel .dsh-task{color:#c7d0ff;word-break:break-all;margin-bottom:6px;}' +
+            '#dshTaskPanel .dsh-todo{list-style:none;margin:4px 0 6px;padding:0;}' +
+            '#dshTaskPanel .dsh-todo li{padding:2px 0 2px 18px;position:relative;word-break:break-all;color:#dfe4f0;}' +
+            '#dshTaskPanel .dsh-todo li:before{content:"○";position:absolute;left:0;color:#8b95c9;}' +
+            '#dshTaskPanel .dsh-todo li.dsh-done:before{content:"●";color:#6ee7a0;}' +
+            '#dshTaskPanel .dsh-todo li.dsh-done{color:#9aa3bd;text-decoration:line-through;}' +
+            '#dshTaskPanel .dsh-out-btn{width:100%;margin:2px 0 4px;padding:5px;cursor:pointer;background:rgba(120,132,255,.14);' +
+            'border:1px solid rgba(120,132,255,.3);color:#cdd6ff;border-radius:8px;}' +
+            '#dshTaskPanel .dsh-out{display:none;background:rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.08);' +
+            'border-radius:8px;padding:6px 8px;margin-top:4px;max-height:220px;overflow:auto;white-space:pre-wrap;' +
+            'word-break:break-all;color:#b9c2d8;font-size:0.92em;line-height:1.6;}' +
+            '#dshTaskPanel .dsh-out.show{display:block;}' +
+            '#dshTaskPanel .dsh-stats{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:6px;color:#98a1bc;font-size:0.92em;}' +
+            '#dshTaskPanel .dsh-empty{color:#8b93ad;padding:4px 0;}';
+        document.head.appendChild(style);
+
+        panelEl = document.createElement('div');
+        panelEl.id = 'dshTaskPanel';
+        panelEl.className = 'dsh-hide';
+        panelEl.innerHTML =
+            '<div class="dsh-head" id="dshHead">' +
+            '<span class="dsh-dot" id="dshDot"></span>' +
+            '<span class="dsh-title">DSH 空闲</span>' +
+            '<span class="dsh-toggle">▾</span></div>' +
+            '<div class="dsh-body" id="dshBody"></div>';
+        document.body.appendChild(panelEl);
+        applyDshPanelStyle();
+        panelEl.querySelector('#dshHead').addEventListener('click', () => {
+            panelOpen = !panelOpen;
+            applyPanelVisibility();
+        });
+        // 注册鼠标靠近钩子：靠近（四按钮气泡显示）→ 隐藏面板，避免遮挡
+        applyTaskPanelHover = (on) => {
+            taskPanelHovering = !!on;
+            applyPanelVisibility();
+        };
+        // 注册配置变化钩子：设置里改动面板配置 → 浮窗实时重渲染
+        refreshDshPanel = () => { renderPanel(); };
+        // 面板默认收起；仅在任务运行时自动展开
+        renderPanel();
+    }
+
+    function renderPanel() {
+        if (!panelEl) return;
+        applyDshPanelStyle();
+        const cfg = dshPanelCfg();
+        const busy = dshLive.agentStatus === 'running';
+        const dot = panelEl.querySelector('#dshDot');
+        const title = panelEl.querySelector('.dsh-title');
+        dot.style.background = busy ? '#ffd76e' : (dshLive.pluginReachable ? '#6ee7a0' : '#8b93ad');
+        title.textContent = busy ? 'DSH 任务中' : (dshLive.pluginReachable ? 'DSH 空闲' : 'DSH 未连接');
+
+        const body = panelEl.querySelector('#dshBody');
+        if (!busy && !dshLive.task) {
+            body.innerHTML = '<div class="dsh-empty">暂无任务…</div>';
+            applyPanelVisibility();
+            return;
+        }
+        let html = '';
+        if (cfg.showMinds && Array.isArray(dshLive.minds) && dshLive.minds.length) {
+            const latest = dshLive.minds.slice(-2);
+            html += '<div style="font-size:0.92em;line-height:1.5;color:#9fb0e8;background:rgba(120,132,255,.10);' +
+                'border:1px solid rgba(120,132,255,.2);border-radius:8px;padding:4px 8px;margin-bottom:6px;word-break:break-all;">';
+            latest.forEach(m => {
+                const tag = m.kind === 'think' ? '💭 思考' : (m.kind === 'tool' ? '🛠 工具' : '📋 内容');
+                html += '<div><span style="opacity:.75;">' + tag + '：</span>' + escapeHtml(m.text) + '</div>';
+            });
+            html += '</div>';
+        }
+        if (cfg.showTask && dshLive.task) html += '<div class="dsh-task">📌 ' + escapeHtml(dshLive.task) + '</div>';
+        if (cfg.showTodo && Array.isArray(dshLive.todolist) && dshLive.todolist.length) {
+            html += '<ul class="dsh-todo">';
+            dshLive.todolist.forEach(t => {
+                const text = typeof t === 'string' ? t : (t.text || '');
+                const done = typeof t === 'object' && (t.status === 'done' || t.status === 'completed' || t.status === 'closed');
+                html += '<li class="' + (done ? 'dsh-done' : '') + '">' + escapeHtml(text) + '</li>';
+            });
+            html += '</ul>';
+        }
+        if (cfg.showOutput) {
+            html += '<button class="dsh-out-btn" id="dshOutBtn">' +
+                (panelOutOpen ? '▾ 收起输出' : '▸ 点击查看当前输出（思维链 / 工具）') + '</button>' +
+                '<div class="dsh-out' + (panelOutOpen ? ' show' : '') + '" id="dshOut">' + escapeHtml(outputText()) + '</div>';
+        }
+        if (cfg.showStats) {
+            html += '<div class="dsh-stats">' +
+                '<span>缓存命中 ' + hitRateText() + '</span>' +
+                '<span>花费 ¥' + (dshLive.totals.cost || 0).toFixed(2) + '</span>' +
+                '<span>Token ' + fmtNum(dshLive.totals.tokens || 0) + '</span>' +
+                '<span>' + escapeHtml(balanceText()) + '</span>' +
+                '</div>';
+        }
+        body.innerHTML = html;
+        const outBtn = body.querySelector('#dshOutBtn');
+        if (outBtn) outBtn.addEventListener('click', () => {
+            panelOutOpen = !panelOutOpen;
+            renderPanel();
+        });
+        if (busy && !panelOpen) {
+            panelOpen = true;
+        }
+        applyPanelVisibility();
+    }
+
+    let panelOutOpen = false;
+    function outputText() {
+        const outs = Array.isArray(dshLive.output) ? dshLive.output : [];
+        const steps = outs.slice(-60).map(o => {
+            if (typeof o === 'string') return o;
+            if (o && Array.isArray(o.items)) return '· 工具 ' + (o.name || '') + '\n' + o.items.join('\n');
+            if (o && typeof o === 'object') return '· ' + (o.name || o.type || '') + (o.text ? ': ' + o.text : '');
+            return '';
+        }).join('\n');
+        return steps || '（暂无输出）';
+    }
+
+    function escapeHtml(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+        ));
+    }
+
+    // ---------- 设置窗口：监控区渲染 ----------
+    function renderSettingsMonitor() {
+        const el = document.getElementById('dshMonitor');
+        if (!el) return;
+        const busy = dshLive.agentStatus === 'running';
+        let html = '';
+        html += '状态：' + (busy ? '🟡 任务运行中' : (dshLive.pluginReachable ? '🟢 已连接（空闲）' : '⚪ 未连接插件（请确认 DSH 已安装并加载 dsh-pet-link）')) + '\n';
+        if (dshLive.task) html += '任务：' + dshLive.task + '\n';
+        if (dshLive.lastTool) html += '最近工具：' + dshLive.lastTool + '\n';
+        if (Array.isArray(dshLive.todolist) && dshLive.todolist.length) {
+            html += 'Todolist：\n' + dshLive.todolist.map(t => {
+                const text = typeof t === 'string' ? t : (t.text || '');
+                const done = typeof t === 'object' && (t.status === 'done' || t.status === 'completed' || t.status === 'closed');
+                return (done ? '  ✓ ' : '  ○ ') + text;
+            }).join('\n') + '\n';
+        }
+        if (Array.isArray(dshLive.output) && dshLive.output.length) {
+            html += '最近输出：' + outputText().split('\n').slice(-6).join('\n') + '\n';
+        }
+        html += '缓存命中率：' + hitRateText() +
+            ' | 累计花费 ¥' + (dshLive.totals.cost || 0).toFixed(2) +
+            ' | Token ' + fmtNum(dshLive.totals.tokens || 0) + '\n' +
+            balanceText();
+        el.textContent = html;
+    }
+
+    // ---------- 处理插件推送 ----------
+    function handleDshMessage(payload) {
+        if (!payload || typeof payload !== 'object') return;
+        if (payload.pluginReachable != null) dshLive.pluginReachable = !!payload.pluginReachable;
+        if (payload.agentStatus != null) dshLive.agentStatus = payload.agentStatus;
+        if (payload.task != null) dshLive.task = payload.task;
+        if (Array.isArray(payload.todolist)) dshLive.todolist = payload.todolist;
+        if (payload.tool != null) dshLive.lastTool = payload.tool;
+        if (Array.isArray(payload.output) && payload.output.length) {
+            if (!Array.isArray(dshLive.output)) dshLive.output = [];
+            dshLive.output = dshLive.output.concat(payload.output).slice(-120);
+        }
+        if (payload.totals) dshLive.totals = { ...dshLive.totals, ...payload.totals };
+        if (payload.balance) dshLive.balance = payload.balance;
+        if (Array.isArray(payload.minds)) dshLive.minds = payload.minds;
+
+        // DSH 覆盖状态机：任务运行中暂停随机状态机，按环节推送切换贴图（保留各状态特效）
+        const ovr = dshOverrideCfg();
+        if (ovr.enabled) {
+            // 先按环节切贴图，再处理启停：turn/end 推送同时带 category(done/error) 与 agentStatus:'idle'，
+            // 若先退出覆盖，done/error 环节贴图会被跳过（表现为「设置好了但不切换」）
+            if (dshOverrideActive && payload.category) {
+                const st = ovr.states[payload.category];
+                if (st && typeof setPetState === 'function' && KNOWN_STATES.includes(st)) {
+                    setPetState(st);
+                }
+            }
+            if (payload.agentStatus === 'running' && !dshOverrideActive) setDshOverrideActive(true);
+            if (payload.agentStatus === 'idle' && dshOverrideActive) setDshOverrideActive(false);
+        }
+
+        // 原生审批 / 提问：DSH approval seam 或（旧）模型提问 → 桌宠弹窗
+        if ((payload.event === 'approval' || payload.event === 'ask') && payload.question) {
+            const isApproval = payload.event === 'approval';
+            const question = isApproval
+                ? ('🔐 ' + (payload.reason || payload.question)) + (payload.toolName ? '\n（工具：' + payload.toolName + '）' : '')
+                : ('❓ ' + payload.question);
+            showAskDialog(String(question), isApproval ? ['允许', '拒绝', '取消'] : ['是', '否', '取消']);
+        }
+
+        // 说话 + 切贴图（仅桌宠/聊天窗口；语音开关由 speakText 内部判断）
+        // 任务完成时 TTS 只播报简短的完成语（随机挑选），不再念插件推送的长文案
+        if ((payload.event === 'task/done' || payload.event === 'test/done') && typeof speakText === 'function') {
+            const DONE_PHRASES = ['任务完成！', '任务搞定啦！', '完成啦～', '搞定！', '任务完成～'];
+            speakText(DONE_PHRASES[Math.floor(Math.random() * DONE_PHRASES.length)]);
+        } else if (payload.say && typeof speakText === 'function') {
+            speakText(String(payload.say));
+        }
+        // 覆盖状态机开启且本轮已按环节切过贴图时，插件自带的 state 不再二次覆盖
+        // （用户设置的环节贴图优先；turn/end 推送同时带 category 与 state 的场景即此例）
+        const overrideDecided = ovr.enabled && dshOverrideActive && !!payload.category;
+        if (!overrideDecided && payload.state && typeof setPetState === 'function' && KNOWN_STATES.includes(payload.state)) {
+            setPetState(payload.state);
+        }
+
+        renderStatBar();
+        if (isSettingsMode) renderSettingsMonitor();
+        else renderPanel();
+    }
+
+    // DSH 覆盖状态机配置（设置 → DSH 联动）
+    function dshOverrideCfg() {
+        const c = (config && config.dsh && config.dsh.override) || {};
+        return { enabled: c.enabled !== false, states: c.states || {} };
+    }
+    // 是否在任务面板上方显示 DSH 最新思维/工具/查找内容
+    function dshShowMinds() {
+        return !config || config.dshShowMinds !== false;
+    }
+    // 设置信息条实际高度到 --pet-stat-h：显示时把贴图/按钮顶上去，隐藏时归零
+    function applyStatLift() {
+        const bar = document.getElementById('petStatBar');
+        const root = document.documentElement;
+        if (!bar || bar.style.display === 'none') {
+            root.style.setProperty('--pet-stat-h', '0px');
+            return;
+        }
+        requestAnimationFrame(() => {
+            const h = bar.offsetHeight || 0;
+            root.style.setProperty('--pet-stat-h', (h + 4) + 'px');
+        });
+    }
+    function renderStatBar() {
+        // 聊天模式：隐藏下方信息条（由聊天分支 JS + CSS 硬兜底共同保证）
+        if (isSettingsMode || isChatMode) {
+            const bar = document.getElementById('petStatBar');
+            if (bar && bar.style.display !== 'none') {
+                bar.style.display = 'none';
+                applyStatLift();
+            }
+            return;
+        }
+        const bar = document.getElementById('petStatBar');
+        if (!bar) return;
+        const cfg = statDisplayCfg();
+        const parts = [];
+        if (cfg.dsh) {
+            const hitRate = hitRateText();
+            const cost = (dshLive.totals.cost || 0).toFixed(2);
+            const conn = dshLive.pluginReachable ? '🟢' : '⚪';
+            parts.push(conn + ' DSH ' + (dshLive.agentStatus === 'running' ? '运行中' : (dshLive.pluginReachable ? '空闲' : '未连')));
+            parts.push('缓存 ' + hitRate + ' · ¥' + cost);
+        }
+        if (cfg.rate && statRate) parts.push(statRate.label);
+        if (cfg.hardware && statHw) {
+            let hw = 'CPU ' + statHw.cpuPct + '% · 内存 ' + statHw.memPct + '%';
+            if (statHw.tempC != null) hw += ' · ' + statHw.tempC + '°C';
+            parts.push(hw);
+        }
+        if (parts.length === 0) {
+            if (bar.style.display !== 'none') {
+                bar.style.display = 'none';
+                applyStatLift();
+                bar.textContent = '';
+            }
+            return;
+        }
+        bar.textContent = parts.join('  ·  ');
+        if (bar.style.display === 'none') {
+            bar.style.display = 'block';
+            applyStatLift();
+        } else {
+            applyStatLift();
+        }
+    }
+    let statHw = null, statRate = null;
+    function startStatBar() {
+        if (isSettingsMode) return;
+        renderStatBar();
+        statTimer = setInterval(async () => {
+            try {
+                if (window.electronAPI && window.electronAPI.getSystemStats) {
+                    const s = await window.electronAPI.getSystemStats();
+                    if (s) { statHw = s; statRate = s.ratePeriod || null; }
+                }
+            } catch (e) { /* 忽略 */ }
+            renderStatBar();
+        }, 5000);
+    }
+    // ---------- 贴图下方信息条配置 ----------
+    let statTimer = null;
+    function statDisplayCfg() {
+        const c = (config && config.dshInfo) || {};
+        return { dsh: c.dsh !== false, hardware: c.hardware !== false, rate: c.rate !== false };
+    }
+
+    // ---------- ask_user 弹窗（模型提问/请求批准）----------
+    let askModal = null;
+    function showAskDialog(question, options) {
+        if (!askModal || !document.body.contains(askModal)) {
+            const style = document.createElement('style');
+            style.textContent =
+                '#dshAskModal{position:fixed;inset:0;z-index:999999;display:flex;align-items:center;justify-content:center;' +
+                'background:rgba(10,12,20,.45);backdrop-filter:blur(2px);}' +
+                '#dshAskBox{width:min(340px,86vw);background:#fff;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.3);' +
+                'padding:18px;font:13px/1.7 system-ui,sans-serif;color:#222;max-height:70vh;overflow:auto;}' +
+                '#dshAskQ{font-weight:600;margin:0 0 14px;word-break:break-all;white-space:pre-wrap;}' +
+                '#dshAskBtns{display:flex;flex-wrap:wrap;gap:8px;}' +
+                '#dshAskBtns button{flex:1;min-width:84px;padding:8px 10px;border-radius:8px;border:1px solid #d3d9e3;' +
+                'background:#f6f8fb;cursor:pointer;font-size:13px;}' +
+                '#dshAskBtns button:hover{background:#e9eef7;}' +
+                '#dshAskBtns button.ask-cancel{background:#ffecec;border-color:#f3c1c1;color:#c0392b;}';
+            document.head.appendChild(style);
+            askModal = document.createElement('div');
+            askModal.id = 'dshAskModal';
+            askModal.innerHTML = '<div id="dshAskBox"><p id="dshAskQ"></p><div id="dshAskBtns"></div></div>';
+            document.body.appendChild(askModal);
+        } else {
+            const q = askModal.querySelector('#dshAskQ');
+            const b = askModal.querySelector('#dshAskBtns');
+            q.textContent = ''; b.innerHTML = '';
+        }
+        const q = askModal.querySelector('#dshAskQ');
+        const b = askModal.querySelector('#dshAskBtns');
+        q.textContent = '❓ ' + question;
+        options.forEach((opt, i) => {
+            const btn = document.createElement('button');
+            btn.textContent = opt;
+            if (opt === '取消' || i === options.length - 1) btn.className = 'ask-cancel';
+            btn.addEventListener('click', () => {
+                askModal.style.display = 'none';
+                if (opt === '取消' && window.electronAPI && window.electronAPI.dshAskRespond) {
+                    window.electronAPI.dshAskRespond('', -1, true);
+                } else if (window.electronAPI && window.electronAPI.dshAskRespond) {
+                    window.electronAPI.dshAskRespond(String(opt), i, false);
+                }
+            });
+            b.appendChild(btn);
+        });
+        askModal.style.display = 'flex';
+    }
+
+    // ---------- 设置面板控件 ----------
+    function bindSettings() {
+        const enToggle = document.getElementById('dshEnabledToggle');
+        const portInput = document.getElementById('dshPluginPortInput');
+        const taskInput = document.getElementById('dshTaskInput');
+        const sendBtn = document.getElementById('dshSendTaskBtn');
+        const cancelBtn = document.getElementById('dshCancelTaskBtn');
+        if (enToggle) {
+            enToggle.addEventListener('change', () => window.electronAPI.dshSetEnabled(enToggle.checked));
+        }
+        if (portInput) {
+            portInput.addEventListener('change', () => {
+                const n = parseInt(portInput.value.trim(), 10);
+                if (n > 0 && n < 65536) {
+                    window.electronAPI.dshSetPluginPort(n);
+                } else {
+                    portInput.value = '43999';
+                }
+            });
+        }
+        if (sendBtn && taskInput) {
+            sendBtn.addEventListener('click', async () => {
+                const text = taskInput.value.trim();
+                if (!text) return;
+                sendBtn.disabled = true;
+                const res = await window.electronAPI.dshSendTask(text);
+                sendBtn.disabled = false;
+                if (res && res.ok) { taskInput.value = ''; }
+                else alert('派发失败：' + ((res && (res.error || (res.data && res.data.error))) || '无法连接 dsh-pet-link 插件'));
+            });
+        }
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => window.electronAPI.dshCancelTask());
+        }
+        const testBtn = document.getElementById('dshTestStateBtn');
+        if (testBtn) {
+            testBtn.addEventListener('click', async () => {
+                testBtn.disabled = true;
+                const orig = testBtn.textContent;
+                testBtn.textContent = '模拟中…';
+                try {
+                    // 桌宠本地模拟（必然执行） + 插件 /test-state 真实链路（插件在线时并行）
+                    const res = await window.electronAPI.dshTestState({});
+                    const pluginInfo = res && res.plugin
+                        ? ('plugin=' + (res.plugin.ok ? 'ok' : ('failed(' + (res.plugin.httpStatus || res.plugin.error || 'unknown') + ')')))
+                        : 'plugin=not-connected';
+                    console.log('[float] test push done: local=' + (res && res.local ? 'yes' : 'no') + ' | ' + pluginInfo);
+                } catch (e) {
+                    console.warn('[float] test push error:', e);
+                }
+                testBtn.textContent = orig;
+                testBtn.disabled = false;
+                if (typeof renderSettingsMonitor === 'function') renderSettingsMonitor();
+            });
+        }
+        // 信息条显示项（三项独立开关）
+        const dshChk = document.getElementById('dshStatDsh');
+        const hwChk = document.getElementById('dshStatHardware');
+        const rateChk = document.getElementById('dshStatRate');
+        const saveInfoCfg = () => {
+            if (!config) return;
+            config.dshInfo = {
+                dsh: !!(dshChk && dshChk.checked),
+                hardware: !!(hwChk && hwChk.checked),
+                rate: !!(rateChk && rateChk.checked)
+            };
+            if (window.electronAPI && window.electronAPI.syncConfig) window.electronAPI.syncConfig(config);
+        };
+        if (dshChk) dshChk.addEventListener('change', saveInfoCfg);
+        if (hwChk) hwChk.addEventListener('change', saveInfoCfg);
+        if (rateChk) rateChk.addEventListener('change', saveInfoCfg);
+        // ---- DSH 覆盖状态机 / 环节贴图 / 思维栏 ----
+        const saveOverride = (patch) => {
+            if (!config) return;
+            config.dsh = { ...(config.dsh || {}), override: { enabled: true, states: {}, ...(config.dsh && config.dsh.override), ...patch } };
+            if (window.electronAPI && window.electronAPI.syncConfig) window.electronAPI.syncConfig(config);
+        };
+        const ovrToggle = document.getElementById('dshOverrideToggle');
+        if (ovrToggle) {
+            const ovr = dshOverrideCfg();
+            ovrToggle.checked = ovr.enabled;
+            ovrToggle.addEventListener('change', () => saveOverride({ enabled: ovrToggle.checked }));
+        }
+        fillOverrideSelects(); // 环节下拉由模块级函数填充（状态注册完成后再刷新）
+
+        // ---- 任务面板设置（高度 / 字号 / 距贴图距离 / 显示内容 + 实时预览）----
+        const saveDshPanel = (patch) => {
+            if (!config) return;
+            config.dshPanel = { ...(config.dshPanel || {}), ...patch };
+            if (window.electronAPI && window.electronAPI.syncConfig) window.electronAPI.syncConfig(config);
+            renderDshPanelPreview();
+            if (refreshDshPanel) refreshDshPanel();
+        };
+        const bindPanelSlider = (id, valId, suffix, onInput) => {
+            const s = document.getElementById(id), v = document.getElementById(valId);
+            if (!s) return;
+            const setVal = (val) => {
+                s.value = String(val);
+                if (v) v.textContent = val + suffix;
+            };
+            s.addEventListener('input', () => onInput(Number(s.value)));
+            return { setVal };
+        };
+        const pCfg = dshPanelCfg();
+        const hBind = bindPanelSlider('dshPanelHeightSlider', 'dshPanelHeightValue', pCfg.height ? 'px' : '（自动）', (n) => saveDshPanel({ height: n }));
+        const fBind = bindPanelSlider('dshPanelFontSlider', 'dshPanelFontValue', 'px', (n) => saveDshPanel({ fontSize: n }));
+        const oBind = bindPanelSlider('dshPanelOffsetSlider', 'dshPanelOffsetValue', 'px', (n) => saveDshPanel({ offset: n }));
+        const hovBind = bindPanelSlider('dshPanelHoverSlider', 'dshPanelHoverValue', 'px', (n) => saveDshPanel({ hoverGap: n }));
+        if (hBind) hBind.setVal(pCfg.height || 0);
+        if (fBind) fBind.setVal(pCfg.fontSize);
+        if (oBind) oBind.setVal(pCfg.offset);
+        if (hovBind) hovBind.setVal(pCfg.hoverGap);
+        const contentToggles = {
+            dshPanelShowMinds: 'showMinds',
+            dshPanelShowTask: 'showTask',
+            dshPanelShowTodo: 'showTodo',
+            dshPanelShowOutput: 'showOutput',
+            dshPanelShowStats: 'showStats',
+        };
+        for (const id in contentToggles) {
+            const el = document.getElementById(id);
+            if (!el) continue;
+            const key = contentToggles[id];
+            el.checked = dshPanelCfg()[key];
+            el.addEventListener('change', () => saveDshPanel({ [key]: el.checked }));
+        }
+        renderDshPanelPreview();
+    }
+
+    function applySettingsFromConfig() {
+        const enToggle = document.getElementById('dshEnabledToggle');
+        const portInput = document.getElementById('dshPluginPortInput');
+        const info = (config && config.dshInfo) || {};
+        const dshChk = document.getElementById('dshStatDsh');
+        const hwChk = document.getElementById('dshStatHardware');
+        const rateChk = document.getElementById('dshStatRate');
+        if (enToggle && config) enToggle.checked = !!(config.dsh && config.dsh.enabled);
+        if (portInput && config && config.dsh && config.dsh.pluginPort) {
+            portInput.value = config.dsh.pluginPort;
+        }
+        if (dshChk) dshChk.checked = info.dsh !== false;
+        if (hwChk) hwChk.checked = info.hardware !== false;
+        if (rateChk) rateChk.checked = info.rate !== false;
+        // 任务面板设置（从配置恢复滑块/勾选 + 预览）
+        const pp = dshPanelCfg();
+        const setSlider = (id, valId, val, suffix) => {
+            const s = document.getElementById(id), v = document.getElementById(valId);
+            if (s) s.value = String(val);
+            if (v) v.textContent = val + suffix;
+        };
+        setSlider('dshPanelHeightSlider', 'dshPanelHeightValue', pp.height || 0, pp.height ? 'px' : '（自动）');
+        setSlider('dshPanelFontSlider', 'dshPanelFontValue', pp.fontSize, 'px');
+        setSlider('dshPanelOffsetSlider', 'dshPanelOffsetValue', pp.offset, 'px');
+        setSlider('dshPanelHoverSlider', 'dshPanelHoverValue', pp.hoverGap, 'px');
+        const ct = { dshPanelShowMinds:'showMinds', dshPanelShowTask:'showTask', dshPanelShowTodo:'showTodo', dshPanelShowOutput:'showOutput', dshPanelShowStats:'showStats' };
+        for (const id in ct) { const el = document.getElementById(id); if (el) el.checked = pp[ct[id]]; }
+        renderDshPanelPreview();
+    }
+
+    // 初始拉取一次主进程缓存状态（如程序先于桌宠启动、已累积若干消息）
+    if (window.electronAPI.dshGetStatus) {
+        window.electronAPI.dshGetStatus().then(s => {
+            if (s) {
+                dshLive = { ...dshLive, ...s };
+                if (isSettingsMode) renderSettingsMonitor(); else renderPanel();
+            }
+        }).catch(() => {});
+    }
+    if (window.electronAPI.onDshMessage) {
+        window.electronAPI.onDshMessage(handleDshMessage);
+    }
+    if (isSettingsMode) {
+        bindSettings();
+        applySettingsFromConfig();
+        renderSettingsMonitor();
+    } else {
+        ensurePanel();
+        startStatBar();
+    }
+})();
 

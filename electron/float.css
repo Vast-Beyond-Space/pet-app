@@ -28,7 +28,7 @@ body {
 
 .float-pet {
     position: absolute;
-    bottom: var(--float-pet-bottom, calc(8% + var(--float-pet-size, 80px)));
+    bottom: calc(var(--float-pet-bottom, calc(8% + var(--float-pet-size, 80px))) + var(--pet-stat-h, 0px));
     left: 50%;
     transform: translateX(-50%);
     width: var(--float-pet-size, 80px);
@@ -270,7 +270,7 @@ body {
 /* ===== 对话气泡（默认隐藏，鼠标靠近时显示）===== */
 .float-bubble {
     position: absolute;
-    bottom: calc(var(--float-pet-bottom, 4px) + var(--float-pet-size, 80px) + 6px + var(--float-bubble-offset, 0px));
+    bottom: calc(var(--float-pet-bottom, 4px) + var(--float-pet-size, 80px) + 6px + var(--float-bubble-offset, 0px) + var(--pet-stat-h, 0px));
     left: 50%;
     transform: translateX(-50%);
     background: rgba(255, 255, 255, 0.95);

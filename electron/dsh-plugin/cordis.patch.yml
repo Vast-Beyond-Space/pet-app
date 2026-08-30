@@ -1,0 +1,15 @@
+# dsh-pet-link 插件加载层（DWeb 与桌面 DSH 共用同一 profile 机制）
+# 安装后以 bundle 形式打进你的 profile（见 README「安装插件」）
+- insert:
+    - id: pet-link
+      name: dsh-pet-link
+      config:
+        port: 43999
+        petUrl: 'http://127.0.0.1:34165'
+        # 细分任务完成后的文案，支持占位符：{task} {tool} {dur} {hit}
+        say: 'DSH 刚完成一轮「{task}」，缓存命中率 {hit}，我一秒都没偷懒地在盯着～'
+        # 事件 → 桌宠贴图状态（必须是你桌宠已注册的「浮窗_xx」原名）
+        states:
+          running: '工作'
+          done: '开心'
+          error: '难过'
