@@ -14,7 +14,8 @@
     "dist": "node scripts/build.js"
   },
   "author": "PetApp",
-  "license": "MIT",
+  "license": "(MIT AND LicenseRef-WhaleGirl-CC-NC-SA-4.0)",
+  "licenseNote": "Dual license: code under MIT; 女仆装(DeepSeek 女仆鲸鱼娘)贴图 under CC BY-NC-SA 4.0. See root LICENSE Part B.",
   "devDependencies": {
     "adm-zip": "^0.5.18",
     "electron": "31.0.0",

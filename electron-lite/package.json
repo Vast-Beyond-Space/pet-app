@@ -4,7 +4,8 @@
   "description": "桌宠 Lite - 轻量桌宠（仅浮窗+聊天），独立启动与打包，与原版共享设置和记忆",
   "main": "main.js",
   "author": "PetApp",
-  "license": "MIT",
+  "license": "(MIT AND LicenseRef-WhaleGirl-CC-NC-SA-4.0)",
+  "licenseNote": "Dual license: code under MIT; 女仆装(DeepSeek 女仆鲸鱼娘)贴图 under CC BY-NC-SA 4.0. See root LICENSE Part B.",
   "scripts": {
     "start": "node start.js",
     "setup-tts": "node scripts/setup-tts.js",

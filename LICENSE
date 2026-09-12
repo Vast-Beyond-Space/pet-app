@@ -1,3 +1,14 @@
+# License（许可证）
+
+本项目采用**双许可证（Dual License）**。代码与部分图像资源适用不同的许可条款，使用时请分别遵守各自条款。
+
+- **代码部分**（本项目自研的软件、脚本、配置、页面等）：适用 **MIT License**，见下文 **Part A**。
+- **“女仆装”贴图资源**（DeepSeek 女仆鲸鱼娘 / 桌宠贴图）：适用 **CC BY-NC-SA 4.0**，见下文 **Part B**。该部分**不属于** Part A 的 MIT 授权范围，单独说明。
+
+---
+
+## Part A — MIT License（软件 / 代码）
+
 MIT License
 
 Copyright (c) 2026 Vast-Beyond-Space
@@ -19,3 +30,38 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+## Part B — “女仆装”贴图资源：CC BY-NC-SA 4.0（鲸鱼娘形象单独说明）
+
+本仓库以下目录中的贴图资源（“女仆装”主题桌宠贴图、情绪贴图、家具/浮窗贴图等）：
+
+- `女仆装/`
+- `electron/img/女仆装/`
+- `electron-lite/img/女仆装/`
+
+**不受 Part A 的 MIT 许可约束**，独立适用知识共享 **署名—非商业性使用—相同方式共享 4.0 国际（CC BY-NC-SA 4.0）**。
+
+### 1. 形象来源与署名（Attribution，BY）
+
+这些贴图以社区公开流通的 **DeepSeek 鲸鱼娘（女仆鲸鱼娘 /“蓝色大肥鱼”）** 同人形象为蓝本创作、改编，授权链如下：
+
+1. **“溟月”** —— 由 **上善无形** 于 2025 年 6 月使用 AI 创作的原创角色，确立蓝色渐变长发、呆毛、鲸类头鳍、蓝色眼睛、大型鲸尾等基本设定，已以 **CC BY-NC-SA 4.0** 公开开放二次创作。
+2. **“女仆鲸鱼娘”** —— 由 B 站用户 **ZipZipPipe** 于 2026 年 4 月 25 日基于“溟月”改造，引入 DeepSeek 元素并设计为深蓝、白色长裙女仆装，构成现行流通的女仆鲸鱼娘形象；作为“溟月”的衍生作品，继续遵循 **CC BY-NC-SA 4.0**。
+
+在使用、分发或修改本部分资源时，须保留对上述原作者的署名，并如实说明对原形象进行了改编。
+
+### 2. 使用条件（CC BY-NC-SA 4.0 摘要）
+
+依据官方许可条款，本部分资源受以下约束：
+
+- **署名（BY）**：须以适当方式注明原作者及来源。
+- **非商业性使用（NC）**：不得将本部分资源用于商业目的。
+- **相同方式共享（SA）**：基于本部分资源的任何改编 / 衍生作品，必须以同样的 **CC BY-NC-SA 4.0** 许可发布。
+
+完整条款请参见：https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode.zh-hans
+
+### 3. 商标与品牌提示
+
+“DeepSeek” 及相关鲸鱼商标 / 品牌元素属 DeepSeek（杭州深度求索人工智能基础技术研究有限公司及其关联公司）的权利。Part B 仅涉及贴图资源的著作权授权，**不**授予任何对 “DeepSeek” 名称、鲸鱼 logo 等商标 / 品牌特征的使用许可。对 DeepSeek 品牌的使用须另行遵守 DeepSeek 平台及服务使用条款等约定。
