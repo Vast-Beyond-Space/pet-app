@@ -73,6 +73,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 保存记忆到文件（直接写入 petMemory.json）
     memorySave: (items) => ipcRenderer.invoke('memory-save', items),
 
+    // 追加记忆（append-only，主进程合并去重后写盘）：新增记忆一律用它，避免多窗口整份覆盖互相冲掉
+    memoryAppend: (items) => ipcRenderer.invoke('memory-append', items),
+
     // 监听记忆更新
     onMemoryUpdated: (callback) => ipcRenderer.on('memory-updated', (event, items) => callback(items)),
 
@@ -222,10 +225,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // ===== 多模态（智谱 AI）=====
     captureScreen: (recentMessages) => ipcRenderer.invoke('capture-screen', recentMessages),
+    // 仅截屏返回 base64（不做 AI 分析），供陪伴模式感知哈希
+    captureScreenRaw: () => ipcRenderer.invoke('capture-screen-raw'),
+    // 截屏返回 JPEG base64 缩略图，供陪伴模式直接把图喂给多模态 thinking 模型
+    captureScreenImage: () => ipcRenderer.invoke('capture-screen-image'),
+    // 系统空闲时间（秒），供陪伴模式感知用户键盘/鼠标活跃度
+    companionActivity: () => ipcRenderer.invoke('companion-activity'),
     // 截屏上传 Files API 并缓存，供对话嵌入 file_id 与图像记忆
     uploadScreenshot: () => ipcRenderer.invoke('multimodal-upload-screenshot'),
+    // 记忆总结判定"保留"时调用：把该截图从内存落盘为图像记忆
+    keepMemoryImage: (fileId) => ipcRenderer.invoke('multimodal-keep-image', fileId),
+    // 释放未被记忆保留的截图：远程删除（DeepSeek）+ 丢弃内存副本（不落盘）
+    releaseImages: (fileIds) => ipcRenderer.invoke('multimodal-release-images', fileIds),
     // 手动添加图片记忆：选择本地图片 -> 上传 Files API -> 本地缓存
     uploadMemoryImage: () => ipcRenderer.invoke('multimodal-upload-memory-image'),
+    // 选择窗口背景图片（只返回本地路径与 file:// URL，不上传、不落盘）
+    pickBgImage: () => ipcRenderer.invoke('pick-bg-image'),
     deleteDeepSeekFile: (fileId) => ipcRenderer.invoke('multimodal-delete-file', fileId),
     listDeepSeekFiles: () => ipcRenderer.invoke('multimodal-list-files'),
     deleteScreenshotCache: (imagePath) => ipcRenderer.invoke('multimodal-delete-cache', imagePath),
@@ -276,6 +291,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // 测试 API 连接（设置面板"测试 API"按钮）：验证地址、Key 与模型可用性
     testApi: (params) => ipcRenderer.invoke('ai-test-api', params),
+
+    // 拉取服务商可用模型列表（设置面板"模型选择"的下拉候选，走主进程规避 CORS）
+    listModels: (params) => ipcRenderer.invoke('ai-list-models', params),
 
     // ===== 贴图包管理 =====
     listStickerPacks: () => ipcRenderer.invoke('list-sticker-packs'),

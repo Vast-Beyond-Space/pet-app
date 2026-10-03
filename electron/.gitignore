@@ -1,0 +1,11 @@
+﻿# 用户配置（受限环境下可能回落到仓库目录）
+petAppConfig.json
+petAppConfig.1.json
+# UI 验收脚本与截图（本地工具，不参与打包）
+dsh-temp/
+
+
+# 早期 UI 样张原型（静态 HTML，不参与构建）
+mockups/
+*.bak
+

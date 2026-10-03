@@ -12,6 +12,24 @@ const isChatMode = new URLSearchParams(window.location.search).get('mode') === '
 // 设置面板模式：float.html?mode=settings（独立设置窗口）
 const isSettingsMode = new URLSearchParams(window.location.search).get('mode') === 'settings';
 
+// 陪伴模式标记：由主进程广播的 companion-mode-started/ended 切换 body 类，
+// 用于隐藏下方 DSH 工作状态条（陪伴时浮窗只负责陪伴）
+let isCompanionMode = false;
+if (!isSettingsMode && !isChatMode && window.electronAPI) {
+    if (window.electronAPI.onCompanionModeStarted) {
+        window.electronAPI.onCompanionModeStarted(() => {
+            isCompanionMode = true;
+            document.body.classList.add('companion-mode');
+        });
+    }
+    if (window.electronAPI.onCompanionModeEnded) {
+        window.electronAPI.onCompanionModeEnded(() => {
+            isCompanionMode = false;
+            document.body.classList.remove('companion-mode');
+        });
+    }
+}
+
 // 版本标记：用于确认渲染进程加载的 float.js 是否最新（排查旧副本/内联缓存问题）
 console.log('[float] version 2026-08-29 states-origin+fx-none+preview-fix (isChatMode=' + isChatMode + ', isSettingsMode=' + isSettingsMode + ')');
 
@@ -28,13 +46,16 @@ const floatChatIllust = document.getElementById('floatChatIllust');
 const floatIllustHideBtn = document.getElementById('floatIllustHideBtn');
 const floatIllustShowBtn = document.getElementById('floatIllustShowBtn');
 
-// ===== 气泡选项点击事件 =====
-// 通过事件委托处理气泡内的选项点击
+// ===== 气泡选项 / 常驻动作条 点击事件 =====
+// 通过事件委托处理：.bubble-option 既用于鼠标靠近时弹出的 2×2 气泡，
+// 也用于窗口底部常驻的四个按钮（.pet-action-bar > .pab-item）。
+// 常驻按钮一直可见，所以不要再用气泡的 .show 状态做门禁。
 document.addEventListener('click', (e) => {
     const option = e.target.closest('.bubble-option');
     if (!option) return;
-    // 确保气泡是可见的（鼠标靠近状态）
-    if (!floatBubble.classList.contains('show')) return;
+    const isActionBar = !!option.closest('.pet-action-bar');
+    // 气泡内的选项仍需气泡处于可见状态（鼠标靠近）
+    if (!isActionBar && !floatBubble.classList.contains('show')) return;
 
     const action = option.dataset.action;
     if (action === 'chat') {
@@ -141,6 +162,32 @@ let floatPetBottomOffset = 0;
 let floatBubbleOffset = 0;
 let floatWindowHeightPad = 0;
 
+// —— 桌宠模式常驻动作条（四个按钮）占用的高度 ——
+// 必须与 css/float-ui-additions.css 中 .pet-action-bar 的 height 一致。
+// 声明在模块顶层（不能用 const 放在初始化函数里）：getPetBottomGap() 会在
+// 初始化流程的更早阶段被调用，块级 const 会造成 TDZ——
+// 表现为 "Cannot access 'PET_ACTION_H' before initialization"，
+// 整个浮窗初始化随之中断（窗口尺寸不再更新）。
+// 竖直堆叠常量（自窗口底边往上），必须与 css/float-ui-additions.css 中的 calc 一致：
+//   0                      状态条（DSH 连接 / 硬件 / 峰谷）
+//   PET_STAT_H             ↕ PET_STAT_ACTION_GAP → 底部动作条（四个按钮）
+//   … + PET_ACTION_H       ↕ PET_ACTION_PET_GAP  → 桌宠贴图
+//   贴图上方                DSH 任务面板
+const PET_STAT_H = 40;              // 状态条高度（两行小字 + padding）
+const PET_STAT_ACTION_GAP = 6;
+// 动作条高度 = 按钮尺寸 + 上下留白（由设置里的「按钮大小」驱动，见 petActionH()）
+const PET_ACTION_BUTTON_PAD = 6;    // 按钮上下各留一点，避免贴边
+const PET_BUTTON_SIZE_DEFAULT = 30; // 按钮最小边长（默认值，与设置里的滑块下限一致）
+const PET_ACTION_PET_GAP = 10;
+// 贴图上方额外预留的空间：DSH 任务面板就浮在这一带。
+// 不留则窗口恰好等于「状态条 + 按钮条 + 贴图」，面板的可用高度会被算成 0，
+// 表现为「弹出来的 DSH 监控栏看不见」。
+// 240 是实测值：面板（任务 + todolist + 输出）自然高度约 240px，
+// 留得太少时浏览器会夹紧 bottom，把面板挤到窗口顶部并压扁。
+const PET_HEADROOM = 240;
+// 面板隐藏时贴图上方保留的余量（只够"不贴顶"即可）
+const PET_HEADROOM_HIDDEN = 14;
+
 // 聊天历史
 let chatHistory = [];
 
@@ -219,11 +266,50 @@ let config = {
     multimodalEnabled: false,
     multimodalProvider: 'deepseek',
     zhipuApiUrl: '',
+    // ===== 本地 LLM（OpenAI 兼容：Ollama / LM Studio / vLLM 等）=====
+    localApiUrl: '',
+    localApiKey: '',
+    localModel: '',
+    localCompanionModel: '',
+    localMemoryModel: '',
+    localVisionModel: '',
+    // ===== 云端模型自主选择（空 = 用提供商默认模型）=====
+    // deepseekModel / zhipuModel 为聊天模型；*Companion/*Memory/*Vision 留空则回退聊天模型
+    deepseekModel: '',
+    deepseekCompanionModel: '',
+    deepseekMemoryModel: '',
+    deepseekVisionModel: '',
+    zhipuModel: '',
+    zhipuCompanionModel: '',
+    zhipuMemoryModel: '',
+    zhipuVisionModel: '',
+    // ===== 自定义 / 中转站（OpenAI 兼容，地址与 Key 全部自填）=====
+    customName: '',
+    customApiUrl: '',
+    customApiKey: '',
+    customModel: '',
+    customCompanionModel: '',
+    customMemoryModel: '',
+    customVisionModel: '',
+    // ===== 回退与重试（模型繁忙时的重试次数 + 备选模型 + 跨提供商兜底）=====
+    aiMaxRetries: 2,          // 同一候选的重试次数（0 = 不重试直接换备选）
+    aiRetryDelayMs: 800,      // 首次重试等待（毫秒）
+    aiRetryBackoff: true,     // 指数退避：每次重试等待翻倍
+    crossProviderFallback: true, // 当前提供商全部失败后，是否回退到其它已配置的提供商
+    deepThinking: false,      // 深度思考：先输出 <think>…</think> 再给答复（类似 DeepSeek 客户端）
+    agentEnabled: true,       // Agent 开关：关闭后不提供任何 tools，模型只能纯文本回复
+    deepseekFallbackModels: [], // 各提供商的备选模型（按顺序尝试）
+    // 智谱内置备选序列（与原"GLM 回退链"一致，可在设置面板里增删）
+    zhipuFallbackModels: ['glm-4v-flash', 'glm-4v-plus'],
+    localFallbackModels: [],
+    customFallbackModels: [],
     selectedVoice: 'default',
     voiceEnabled: true,
     voiceAutoSend: true,
     voiceVolume: 1.0,
     stickerPack: '默认',
+    // 外观主题（purple 为默认；其它值由 CSS 的 :root[data-accent=...] 提供配色）
+    theme: 'purple',
     // 设置面板迁移用到的字段（与 index 共用 petConfig，缺省兜底）
     floatMoveMode: 'free',
     floatPetSize: 80,
@@ -240,6 +326,12 @@ let config = {
     buttonSize: 40,
     portraitAuto: true,
     companionWidth: 400,
+    companionFontSize: 14,
+    companionPetSize: 180,
+    companionThoughtFreq: 'low',
+    companionThoughtVisible: false,
+    companionTalkThreshold: 54,
+    companionScreenSensitivity: 'medium',
     // ===== 状态链（迁移自 electron-lite）=====
     stateChains: [],
     interruptState: 'wandering',
@@ -283,6 +375,8 @@ function loadConfig() {
                 if (config.floatShowIllust !== undefined) floatShowIllust = config.floatShowIllust;
                 localStorage.setItem('petConfig', JSON.stringify(config));
                 window._stickerPack = config.stickerPack || '默认';
+                // 权威配置到位后同步外观主题
+                if (typeof applyTheme === 'function') applyTheme(config.theme || 'purple');
                 // 若当前是设置面板模式，刷新控件显示值为权威配置
                 if (isSettingsMode) refreshSettingsValues();
             }
@@ -290,6 +384,20 @@ function loadConfig() {
     }
 }
 loadConfig();
+
+// ===== 外观主题（程序化配色）=====
+// 仅切换 <html data-accent="...">，配色由 CSS 的 --brand 系列令牌驱动，
+// 不涉及任何交互/事件逻辑。未知值统一回落到默认紫。
+const THEME_NAMES = ['purple', 'blue', 'teal', 'green', 'pink'];
+function applyTheme(name) {
+    const t = THEME_NAMES.indexOf(name) >= 0 ? name : 'purple';
+    document.documentElement.setAttribute('data-accent', t);
+    // 同步设置面板色块选中态（不在此处绑定事件）
+    document.querySelectorAll('.theme-swatch').forEach((el) => {
+        el.classList.toggle('active', el.dataset.themeName === t);
+    });
+}
+applyTheme(config.theme || 'purple');
 
 // 保存配置（设置面板复用；与原版共用 petConfig key）
 function saveConfig() {
@@ -299,13 +407,428 @@ function saveConfig() {
     if (window.electronAPI && window.electronAPI.syncConfig) {
         window.electronAPI.syncConfig(config);
     }
+    // [companion-debug] 保存时打印陪伴相关字段，确认改动确实写进了 config 与同步
+    console.log('[companion-debug][saveConfig] companionFontSize=' + config.companionFontSize +
+        ' companionPetSize=' + config.companionPetSize +
+        ' thoughtFreq=' + config.companionThoughtFreq +
+        ' thoughtVisible=' + config.companionThoughtVisible +
+        ' talkThreshold=' + config.companionTalkThreshold +
+        ' screenSens=' + config.companionScreenSensitivity);
 }
+
+// ============================================================
+// 设置面板信息架构：左导航 + 右内容 + 全局搜索
+// ------------------------------------------------------------
+// 导航由现有 .sb-group 自动生成（标题里的 emoji 作为图标、其余作为名称），
+// 所以以后新增/调整设置分组不需要额外维护一份目录。
+// 搜索按「分组内设置项文本」过滤，命中项自动展开、切页并高亮。
+// ============================================================
+// ============================================================
+// 设置面板信息架构（样张结构：一级页 → 分组 → 设置项）
+// ------------------------------------------------------------
+// 一级页固定 6 个：常用 5 页 + 「高级」1 页（收纳行为链 / 状态机 / DSH）。
+// 每个页由若干 data-gk 分组组成；新增分组只要把它的 data-gk 加进对应页，
+// 没登记的会自动落到「高级」页，不会被漏掉。
+// 导航是动态生成的，所以以后增删设置分组不需要维护第二份目录。
+// ============================================================
+const SETTINGS_ADVANCED_GROUPS = ['chain', 'state', 'dsh'];
+
+const SETTINGS_PAGES = [
+    { id: 'appearance', ico: '🎨', name: '外观主题', groups: ['theme', 'material', 'style'] },
+    { id: 'pet', ico: '🐾', name: '桌宠与浮窗', groups: ['window', 'pet', 'sticker'] },
+    { id: 'chat', ico: '💬', name: '交互与语音', groups: ['persona', 'voice'] },
+    { id: 'ai', ico: '🤖', name: 'AI 与工具', groups: ['ai'] },
+    { id: 'data', ico: '💾', name: '记忆与数据', groups: ['member', 'display', 'companion', 'launch', 'home', 'exit'] },
+    { id: 'advanced', ico: '⚙️', name: '高级', groups: SETTINGS_ADVANCED_GROUPS }
+];
+
+// 导航图标兜底：部分 emoji 是 Unicode 13+ 新增（🪟 🧩 🖼️ 🎙️ …），
+// 较旧的 Windows 10（如 19044）自带 Segoe UI Emoji 没有这些字形，会渲染成方框。
+// 这里替换成字形覆盖更广的近义 emoji；只影响分组标题，不改设置项文案。
+const SETTINGS_NAV_ICON_FALLBACK = {
+    '🪟': '🪄', '🧩': '🎛️', '🖼️': '🖼', '🎙️': '🎤', '🗣️': '🎭', '📖': '📘'
+};
+
+let settingsActivePage = SETTINGS_PAGES[0].id;   // 当前一级页
+let settingsSearchQuery = '';                    // 当前搜索词（小写）
+
+function settingsBody() { return document.getElementById('settingsBody'); }
+function settingsGroups() {
+    const body = settingsBody();
+    return body ? Array.from(body.querySelectorAll(':scope > .sb-group')) : [];
+}
+function groupGk(group) { return group.dataset.gk || ''; }
+function groupPageId(gk) {
+    for (const p of SETTINGS_PAGES) if (p.groups.indexOf(gk) >= 0 || p.id === gk) return p.id;
+    return 'advanced';
+}
+/** 桌面端面板够宽，成对出现的短分组并排放，减少竖直滚动 */
+function settingsGroupColumn(group) {
+    if (group.dataset.col) return group.dataset.col;
+    const items = group.querySelectorAll('.sb-item').length;
+    if (items > 4) return 'full';
+    if (groupGk(group) === 'ai' || groupGk(group) === 'material') return 'full';
+    return 'half';
+}
+function settingsGroupTitleText(group) {
+    const t = group.querySelector(':scope > .sb-group-title');
+    return t ? t.textContent.replace(/\s+/g, ' ').trim() : '';
+}
+function updateSettingsNavActive() {
+    const nav = document.getElementById('settingsNav');
+    if (!nav) return;
+    nav.querySelectorAll('.sb-nav-item').forEach((item) => {
+        item.classList.toggle('active', item.dataset.page === settingsActivePage);
+    });
+}
+/** 切页：只显示该页包含的分组；搜索激活时改为跨页过滤（见 applySettingsSearch） */
+function activateSettingsPage(pageId) {
+    const page = SETTINGS_PAGES.find((p) => p.id === pageId) || SETTINGS_PAGES[0];
+    settingsActivePage = page.id;
+    updateSettingsNavActive();
+    if (settingsSearchQuery) return;
+    const body = settingsBody();
+    settingsGroups().forEach((g) => { g.style.display = page.groups.indexOf(groupGk(g)) >= 0 ? '' : 'none'; });
+    if (body) body.scrollTo({ top: 0, behavior: 'instant' });
+}
+function buildSettingsNav() {
+    const nav = document.getElementById('settingsNav');
+    if (!nav || nav.dataset.built === '1') return;
+    nav.innerHTML = SETTINGS_PAGES.map((p) => (
+        '<button type="button" class="sb-nav-item" data-page="' + p.id + '">' +
+        '<span class="sb-nav-ico">' + p.ico + '</span>' +
+        '<span class="sb-nav-text">' + p.name + '</span>' +
+        '</button>'
+    )).join('');
+    nav.dataset.built = '1';
+    nav.querySelectorAll('.sb-nav-item').forEach((item) => {
+        item.addEventListener('click', () => {
+            if (settingsSearchQuery) clearSettingsSearch();
+            activateSettingsPage(item.dataset.page);
+        });
+    });
+    // 每组的布局属性一次写好；并把没归页的分组标记出来便于排查
+    settingsGroups().forEach((g) => {
+        g.dataset.col = settingsGroupColumn(g);
+        g.dataset.page = groupPageId(groupGk(g));
+    });
+    activateSettingsPage(settingsActivePage);
+}
+/** 分组标题的 emoji 作为图标（做兼容替换），其余作为名称 */
+function settingsGroupIcon(group) {
+    const title = settingsGroupTitleText(group);
+    const m = title.match(/^(\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*|\S{1,2})\s*(.*)$/u);
+    const ico = (m && m[1]) || '•';
+    return { ico: SETTINGS_NAV_ICON_FALLBACK[ico] || ico, name: ((m && m[2]) || title).trim() };
+}
+
+/** 在元素文本里标出命中片段（只处理直接文本节点，避免破坏结构） */
+function markSettingsHits(el, query) {
+    if (!el || !query) return;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+    const hits = [];
+    let node;
+    while ((node = walker.nextNode())) {
+        if (node.nodeValue && node.nodeValue.toLowerCase().indexOf(query) >= 0) hits.push(node);
+    }
+    hits.forEach((textNode) => {
+        const text = textNode.nodeValue;
+        const lower = text.toLowerCase();
+        const frag = document.createDocumentFragment();
+        let i = 0, idx;
+        while ((idx = lower.indexOf(query, i)) >= 0) {
+            if (idx > i) frag.appendChild(document.createTextNode(text.slice(i, idx)));
+            const mk = document.createElement('mark');
+            mk.textContent = text.slice(idx, idx + query.length);
+            frag.appendChild(mk);
+            i = idx + query.length;
+        }
+        if (i < text.length) frag.appendChild(document.createTextNode(text.slice(i)));
+        textNode.parentNode.replaceChild(frag, textNode);
+    });
+}
+function clearEventsMarks() {
+    const body = settingsBody();
+    if (!body) return;
+    body.querySelectorAll('mark').forEach((m) => m.replaceWith(document.createTextNode(m.textContent)));
+}
+function clearSettingsSearch() {
+    const input = document.getElementById('settingsSearchInput');
+    const clearBtn = document.getElementById('settingsSearchClear');
+    settingsSearchQuery = '';
+    if (input) input.value = '';
+    if (clearBtn) clearBtn.style.display = 'none';
+    clearEventsMarks();
+    const empty = document.getElementById('settingsEmpty');
+    if (empty) empty.style.display = 'none';
+    settingsGroups().forEach((g) => {
+        g.querySelectorAll('.sb-item').forEach((it) => { it.style.display = ''; });
+        if (g.dataset.searchCollapsed === '1') { g.classList.add('collapsed'); delete g.dataset.searchCollapsed; }
+    });
+    activateSettingsPage(settingsActivePage);
+}
+/** 搜索：跨全部页过滤分组与设置项，命中项高亮并自动滚到第一处 */
+function applySettingsSearch(rawQuery) {
+    const body = settingsBody();
+    const input = document.getElementById('settingsSearchInput');
+    if (!body || !input) return;
+    const clearBtn = document.getElementById('settingsSearchClear');
+    const q = String(rawQuery || '').trim().toLowerCase();
+    settingsSearchQuery = q;
+
+    clearEventsMarks();
+    settingsGroups().forEach((g) => {
+        g.querySelectorAll('.sb-item').forEach((it) => { it.style.display = ''; });
+        if (g.dataset.searchCollapsed === '1') { g.classList.remove('collapsed'); delete g.dataset.searchCollapsed; }
+    });
+    if (clearBtn) clearBtn.style.display = q ? '' : 'none';
+
+    if (!q) {
+        const empty = document.getElementById('settingsEmpty');
+        if (empty) empty.style.display = 'none';
+        activateSettingsPage(settingsActivePage);
+        return;
+    }
+
+    let anyHit = false;
+    let firstHit = null;
+    settingsGroups().forEach((group) => {
+        const items = Array.from(group.querySelectorAll('.sb-item'));
+        let groupHit = false;
+        items.forEach((item) => {
+            const label = item.querySelector('label');
+            const text = ((label || item).textContent || '').toLowerCase();
+            const full = (item.textContent || '').toLowerCase();
+            const hit = text.indexOf(q) >= 0 || full.indexOf(q) >= 0;
+            item.style.display = hit ? '' : 'none';
+            if (hit) {
+                groupHit = true;
+                markSettingsHits(label || item, q);
+                if (!firstHit) firstHit = group;
+            }
+        });
+        if (!groupHit && settingsGroupTitleText(group).toLowerCase().indexOf(q) >= 0) {
+            groupHit = true;
+            markSettingsHits(group.querySelector(':scope > .sb-group-title'), q);
+            if (!firstHit) firstHit = group;
+        }
+        group.style.display = groupHit ? '' : 'none';
+        if (groupHit) {
+            anyHit = true;
+            if (group.classList.contains('collapsed')) {
+                group.dataset.searchCollapsed = '1';
+                group.classList.remove('collapsed');
+            }
+        }
+    });
+
+    const empty = document.getElementById('settingsEmpty');
+    if (empty) empty.style.display = anyHit ? 'none' : '';
+    if (firstHit) body.scrollTo({ top: Math.max(0, firstHit.offsetTop - 8), behavior: 'instant' });
+}
+function initSettingsSearch() {
+    const input = document.getElementById('settingsSearchInput');
+    if (!input || input.dataset.bound === '1') return;
+    input.dataset.bound = '1';
+    let timer = null;
+    input.addEventListener('input', () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => applySettingsSearch(input.value), 120);
+    });
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { clearSettingsSearch(); input.blur(); }
+    });
+    const clearBtn = document.getElementById('settingsSearchClear');
+    if (clearBtn) clearBtn.addEventListener('click', () => { clearSettingsSearch(); input.focus(); });
+}
+function initSettingsLayout() {
+    if (!document.getElementById('settingsPanel')) return;
+    buildSettingsNav();
+    initSettingsSearch();
+}
+
+
+// ============================================================
+// 外观与材质（窗口背景 / 毛玻璃 / 风格语言 / 主色深浅）
+// ------------------------------------------------------------
+// 「背景」指的是窗口内部的最底层（.win-bg），不是电脑桌面：
+// 控件的值全部写成 <html> 上的 CSS 变量，由 css/float-ui-additions.css
+// 消费。这里不碰任何布局与业务逻辑，只负责令牌分发与持久化。
+// ============================================================
+const APPEARANCE_PRESETS = {
+    aurora: { light: 'linear-gradient(160deg, #eef1f8, #dfe4f2)', dark: 'linear-gradient(160deg, #1d1f2b, #14151d)' },
+    dusk: { light: 'radial-gradient(600px 420px at 85% 8%, #ffd9c2, transparent 62%), linear-gradient(150deg, #f6eef7, #e6e2f2)', dark: 'radial-gradient(600px 420px at 85% 8%, #4a2b3c, transparent 62%), linear-gradient(150deg, #241a2b, #171320)' },
+    mint: { light: 'radial-gradient(600px 420px at 12% 12%, #d5f5e6, transparent 62%), linear-gradient(150deg, #eefaf3, #dcecf6)', dark: 'radial-gradient(600px 420px at 12% 12%, #123c34, transparent 62%), linear-gradient(150deg, #12241f, #101c24)' },
+    slate: { light: 'linear-gradient(160deg, #f4f5f8, #e2e5ee)', dark: 'linear-gradient(160deg, #23252f, #14151b)' },
+    brand: { light: 'radial-gradient(700px 460px at 10% 0%, var(--brand-soft-strong), transparent 65%), linear-gradient(160deg, #ffffff, var(--brand-soft))', dark: 'radial-gradient(700px 460px at 10% 0%, var(--brand-soft-strong), transparent 65%), linear-gradient(160deg, #1c1d25, #14151b)' }
+};
+const APPEARANCE_DEFAULTS = {
+    winBgPreset: 'brand',
+    winBgImage: '',
+    winAlpha: 92,
+    panelBlur: 18,
+    bgBlur: 0,
+    bgSat: 100,
+    scrim: 0,
+    glassOn: true,
+    uiStyle: 'fluent',
+    darkMode: false
+};
+function isDarkModeNow() {
+    const dm = config.darkMode;
+    if (dm === 'system') {
+        return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    }
+    return !!dm;
+}
+function applyAppearance() {
+    const root = document.documentElement;
+    const dark = isDarkModeNow();
+    const presetKey = APPEARANCE_PRESETS[config.winBgPreset] ? config.winBgPreset : 'brand';
+    const preset = APPEARANCE_PRESETS[presetKey];
+    const bgImage = String(config.winBgImage || '').trim();
+    // 排查用：外观令牌每次应用都留一条日志（设置改不动时能立刻看出是哪一层没生效）
+    console.log('[appearance] apply',
+        'style=' + (config.uiStyle || 'fluent'),
+        'dark=' + (dark ? 1 : 0),
+        'glass=' + (config.glassOn === false ? 0 : 1),
+        'preset=' + presetKey,
+        'img=' + (bgImage ? 'yes' : 'no'),
+        'alpha=' + (config.winAlpha != null ? config.winAlpha : 92),
+        'blur=' + (config.panelBlur != null ? config.panelBlur : 18));
+
+    root.setAttribute('data-style', config.uiStyle || 'fluent');
+    root.setAttribute('data-ui', config.uiLayout === 'compact' ? 'compact' : 'wide');
+    root.setAttribute('data-dark', dark ? '1' : '0');
+    root.setAttribute('data-glass', config.glassOn === false ? '0' : '1');
+    root.setAttribute('data-bg', bgImage ? 'image' : 'preset');
+    root.dataset.bgPreset = presetKey;
+
+    root.style.setProperty('--win-bg', dark ? preset.dark : preset.light);
+    root.style.setProperty('--win-bg-image', bgImage ? `url("${bgImage.replace(/"/g, '%22')}")` : 'none');
+    root.style.setProperty('--win-alpha', ((config.winAlpha != null ? config.winAlpha : 92) / 100).toFixed(2));
+    root.style.setProperty('--card-alpha', Math.min(1, ((config.winAlpha != null ? config.winAlpha : 92) / 100) + .02).toFixed(2));
+    root.style.setProperty('--chrome-alpha', Math.max(.3, ((config.winAlpha != null ? config.winAlpha : 92) / 100) - .16).toFixed(2));
+    root.style.setProperty('--panel-blur', (config.panelBlur != null ? config.panelBlur : 18) + 'px');
+    root.style.setProperty('--bg-blur', (config.bgBlur || 0) + 'px');
+    root.style.setProperty('--bg-sat', (config.bgSat != null ? config.bgSat : 100) + '%');
+    root.style.setProperty('--scrim', ((config.scrim || 0) / 100).toFixed(2));
+}
+// 设置面板控件 → config → 令牌（控件缺失时静默跳过，浮窗/聊天窗口没有这些控件）
+function refreshAppearanceUI() {
+    const g = (id) => document.getElementById(id);
+    document.querySelectorAll('#bgPresetRow .bg-preset').forEach((b) => {
+        b.classList.toggle('active', b.dataset.preset === (config.winBgPreset || 'brand'));
+    });
+    const bgName = g('winBgImageName');
+    if (bgName) bgName.textContent = config.winBgImage ? String(config.winBgImage).split(/[\\/]/).pop() : '未选择（使用预设渐变）';
+    const bind = (id, valId, key, suffix) => {
+        const el = g(id);
+        if (!el) return;
+        const raw = config[key] != null ? config[key] : APPEARANCE_DEFAULTS[key];
+        el.value = raw;
+        const lbl = g(valId);
+        if (lbl) lbl.textContent = raw + (suffix || '');
+    };
+    bind('winAlphaSlider', 'winAlphaValue', 'winAlpha', '%');
+    bind('panelBlurSlider', 'panelBlurValue', 'panelBlur', 'px');
+    bind('bgBlurSlider', 'bgBlurValue', 'bgBlur', 'px');
+    bind('bgSatSlider', 'bgSatValue', 'bgSat', '%');
+    bind('scrimSlider', 'scrimValue', 'scrim', '%');
+    const glass = g('glassToggle'); if (glass) glass.checked = config.glassOn !== false;
+    const dark = g('darkModeToggle'); if (dark) dark.checked = !!config.darkMode;
+    const style = g('uiStyleSelect'); if (style) style.value = config.uiStyle || 'fluent';
+    const layout = g('uiLayoutSelect');
+    if (layout) layout.value = config.uiLayout === 'compact' ? 'compact' : 'wide';
+    const hint = g('winBgToggleHint');
+    if (hint) {
+        hint.textContent = '聊天 / 设置 / 陪伴窗口共用这一层背景；窗外的电脑桌面不参与毛玻璃。';
+    }
+}
+function initAppearanceControls() {
+    const g = (id) => document.getElementById(id);
+    if (!g('winAlphaSlider')) return; // 当前窗口没有外观控件
+    const setSlider = (id, valId, key, suffix) => {
+        const el = g(id);
+        if (!el) return;
+        el.addEventListener('input', () => {
+            const v = Number(el.value);
+            config[key] = v;
+            const lbl = g(valId);
+            if (lbl) lbl.textContent = v + suffix;
+            applyAppearance();
+            saveConfig();
+        });
+    };
+    setSlider('winAlphaSlider', 'winAlphaValue', 'winAlpha', '%');
+    setSlider('panelBlurSlider', 'panelBlurValue', 'panelBlur', 'px');
+    setSlider('bgBlurSlider', 'bgBlurValue', 'bgBlur', 'px');
+    setSlider('bgSatSlider', 'bgSatValue', 'bgSat', '%');
+    setSlider('scrimSlider', 'scrimValue', 'scrim', '%');
+
+    const glass = g('glassToggle');
+    if (glass) glass.addEventListener('change', () => { config.glassOn = !!glass.checked; applyAppearance(); saveConfig(); });
+    const dark = g('darkModeToggle');
+    if (dark) dark.addEventListener('change', () => { config.darkMode = !!dark.checked; applyAppearance(); saveConfig(); });
+    const style = g('uiStyleSelect');
+    if (style) style.addEventListener('change', () => { config.uiStyle = style.value; applyAppearance(); saveConfig(); });
+    const layout = g('uiLayoutSelect');
+    if (layout) layout.addEventListener('change', () => {
+        config.uiLayout = layout.value;
+        applyAppearance();
+        saveConfig();
+    });
+
+    document.querySelectorAll('#bgPresetRow .bg-preset').forEach((b) => {
+        b.addEventListener('click', () => {
+            config.winBgPreset = b.dataset.preset;
+            config.winBgImage = ''; // 选预设即清掉自定义图片，避免两套背景互相打架
+            document.querySelectorAll('#bgPresetRow .bg-preset').forEach((x) => x.classList.toggle('active', x === b));
+            applyAppearance();
+            saveConfig();
+            refreshAppearanceUI();
+        });
+    });
+    const clearBtn = g('clearBgImageBtn');
+    if (clearBtn) clearBtn.addEventListener('click', () => {
+        config.winBgImage = '';
+        applyAppearance();
+        saveConfig();
+        refreshAppearanceUI();
+    });
+    const pickBtn = g('pickBgImageBtn');
+    if (pickBtn) pickBtn.addEventListener('click', async () => {
+        if (!window.electronAPI || !window.electronAPI.pickBgImage) return;
+        try {
+            const res = await window.electronAPI.pickBgImage();
+            if (!res || res.canceled) return;
+            if (res.error) { alert(res.error); return; }
+            config.winBgImage = res.fileUrl || '';
+            applyAppearance();
+            saveConfig();
+            refreshAppearanceUI();
+        } catch (e) {
+            console.warn('[bg] pick image failed:', e && e.message);
+        }
+    });
+}
+// 跟随系统深浅时，系统主题变化要重算令牌
+if (window.matchMedia) {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onScheme = () => { if (config.darkMode === 'system') applyAppearance(); };
+    if (mq.addEventListener) mq.addEventListener('change', onScheme);
+    else if (mq.addListener) mq.addListener(onScheme);
+}
+applyAppearance();
 
 // 多模态提供商默认 API 地址与标签
 function mmProviderDefaults() {
     return {
         deepseek: { url: 'https://api.deepseek.com/v1/chat/completions', keyLabel: 'DeepSeek API Key', keyPlaceholder: '输入你的 DeepSeek API Key...' },
-        zhipu: { url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', keyLabel: '智谱 API Key', keyPlaceholder: '输入你的智谱 API Key...' }
+        zhipu: { url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', keyLabel: '智谱 API Key', keyPlaceholder: '输入你的智谱 API Key...' },
+        local: { url: 'http://localhost:11434/v1/chat/completions', keyLabel: '本地 API Key（可选）', keyPlaceholder: '本地服务一般不需要 Key，留空即可' },
+        // 自定义 / 中转站：无内置默认地址，全部由用户填写
+        custom: { url: '', keyLabel: 'API Key', keyPlaceholder: '中转站 / 厂商提供的 Key' }
     };
 }
 
@@ -324,12 +847,261 @@ function toChatCompletionsUrl(raw) {
 }
 
 // 当前提供商的聊天凭据（API 设置与多模态设置已合并，只用一家提供商）
+// 地址 / Key 字段按提供商区分：deepseek→apiUrl/apiKey，其余用 <prefix>ApiUrl/<prefix>ApiKey
 function chatCredentials() {
     const p = config.multimodalProvider || 'deepseek';
-    if (p === 'zhipu') {
-        return { base: toChatCompletionsUrl(config.zhipuApiUrl), key: config.zhipuApiKey || '' };
+    const cred = requireAIF().credentials(config, p);
+    return { base: cred.apiUrl, key: cred.apiKey };
+}
+
+// ===== 模型自主选择（按提供商 × 用途）=====
+const $el = (id) => document.getElementById(id);
+// 提供商元信息 / 候选链 / 重试与回退规则统一由 ai-fallback.js 提供（主进程共用同一套实现）
+const AIF = (typeof AIFallback !== 'undefined') ? AIFallback : null;
+function requireAIF() {
+    if (!AIF) throw new Error('ai-fallback.js 未加载，无法进行模型调用');
+    return AIF;
+}
+// 每个提供商都有自己的模型字段，互不覆盖：
+//   deepseek: deepseekModel / deepseekCompanionModel / deepseekMemoryModel / deepseekVisionModel
+//   zhipu:    zhipuModel    / zhipuCompanionModel    / zhipuMemoryModel    / zhipuVisionModel
+//   custom:   customModel   / customCompanionModel   / customMemoryModel   / customVisionModel
+//   local:    localModel    / localCompanionModel    / localMemoryModel    / localVisionModel
+// 规则：用途模型留空 → 回退该提供商的「聊天模型」；聊天模型也留空 → 用提供商默认模型。
+const MODEL_PROVIDER_META = {
+    deepseek: { prefix: 'deepseek', defaultModel: 'deepseek-flash', label: 'DeepSeek' },
+    zhipu: { prefix: 'zhipu', defaultModel: 'glm-4.6v-flash', label: '智谱 AI' },
+    local: { prefix: 'local', defaultModel: '', label: '本地 LLM' },
+    custom: { prefix: 'custom', defaultModel: '', label: '自定义 / 中转站' }
+};
+// 无法从服务商拉取模型列表时（或首次打开）用于下拉提示的候选模型
+const MODEL_PRESETS = {
+    deepseek: ['deepseek-flash', 'deepseek-chat', 'deepseek-reasoner'],
+    zhipu: ['glm-4.6v-flash', 'glm-4.6v', 'glm-4.5-flash', 'glm-4-flash', 'glm-4v-flash', 'glm-4-plus'],
+    local: [],
+    // 中转站 / 其它厂商常见模型名（仅作下拉提示，实际以 🔄 拉取或手填为准）
+    custom: ['gpt-4o-mini', 'gpt-4o', 'claude-3-5-sonnet', 'gemini-1.5-pro', 'qwen-plus', 'deepseek-chat']
+};
+const MODEL_MODES = ['chat', 'companion', 'memory', 'vision'];
+// 从服务商 /models 拉到的列表缓存（仅内存，用于本次设置面板会话的下拉提示）
+const modelListCache = {};
+let modelFetching = false;
+
+// config 中存放某提供商某用途模型名的字段名（实现见 ai-fallback.js，主进程共用）
+function modelFieldKey(provider, mode) {
+    return requireAIF().fieldKey(provider, mode);
+}
+
+// 提供商默认模型（用户完全未配置时使用）
+function providerDefaultModel(provider) {
+    return requireAIF().meta(provider).defaultModel;
+}
+
+// 当前提供商使用的模型名（按模式区分：chat / companion / memory / vision）
+// 规则：用途模型 → 该提供商聊天模型 → 提供商默认模型（本地/中转站可为空，由服务端决定）
+function providerModelName(mode = 'chat', providerOverride) {
+    const p = providerOverride || config.multimodalProvider || 'deepseek';
+    return requireAIF().resolveModel(config, p, mode);
+}
+
+// 当前提供商在界面上的展示名（自定义提供商优先显示用户填的名称）
+function providerDisplayName(provider) {
+    const p = provider || config.multimodalProvider || 'deepseek';
+    if (p === 'custom') return (config.customName || '').trim() || '自定义 / 中转站';
+    return requireAIF().meta(p).label;
+}
+
+// 某提供商可选模型候选：预设 + 已拉取的列表（去重）
+function modelOptionsFor(provider) {
+    const out = [];
+    const push = (n) => { const v = String(n || '').trim(); if (v && out.indexOf(v) === -1) out.push(v); };
+    (MODEL_PRESETS[provider] || []).forEach(push);
+    const cached = modelListCache[provider];
+    if (Array.isArray(cached)) cached.forEach(push);
+    // 已配置的模型名也放进候选，避免下拉把用户自定义值顶掉
+    MODEL_MODES.forEach(m => push(config[modelFieldKey(provider, m)]));
+    return out;
+}
+
+// 供测试连接 / 保存前使用：优先取表单里尚未失焦的值
+function currentModelFromForm(mode = 'chat', provider) {
+    const p = provider || config.multimodalProvider || 'deepseek';
+    const el = $el({ chat: 'modelChatInput', companion: 'modelCompanionInput', memory: 'modelMemoryInput', vision: 'modelVisionInput' }[mode] || 'modelChatInput');
+    const typed = el ? String(el.value || '').trim() : '';
+    if (typed) return typed;
+    return providerModelName(mode, p);
+}
+
+// 当前提供商用于「拉取模型列表」的地址与 Key（表单值优先，便于未保存时直接拉取）
+function modelFetchCredentials(provider) {
+    const p = provider || config.multimodalProvider || 'deepseek';
+    if (p === 'local') {
+        const urlEl = $el('localApiUrlInput');
+        const keyEl = $el('localApiKeyInput');
+        return {
+            provider: p,
+            apiUrl: (urlEl && urlEl.value.trim()) || config.localApiUrl || mmProviderDefaults().local.url,
+            apiKey: ((keyEl && keyEl.value.trim()) || config.localApiKey || '')
+        };
     }
-    return { base: toChatCompletionsUrl(config.apiUrl), key: config.apiKey || '' };
+    const urlEl = $el('apiUrlInput');
+    const keyEl = $el('apiKeyInput');
+    if (p === 'zhipu') {
+        return {
+            provider: p,
+            apiUrl: (urlEl && urlEl.value.trim()) || config.zhipuApiUrl || mmProviderDefaults().zhipu.url,
+            apiKey: ((keyEl && keyEl.value.trim()) || config.zhipuApiKey || '')
+        };
+    }
+    return {
+        provider: p,
+        apiUrl: (urlEl && urlEl.value.trim()) || config.apiUrl || mmProviderDefaults().deepseek.url,
+        apiKey: ((keyEl && keyEl.value.trim()) || config.apiKey || '')
+    };
+}
+
+// 渲染模型选择区：回填各用途输入框、刷新候选下拉与"当前生效"提示
+function refreshModelUI() {
+    const $id = (id) => document.getElementById(id);
+    const p = config.multimodalProvider || 'deepseek';
+    const meta = MODEL_PROVIDER_META[p] || MODEL_PROVIDER_META.deepseek;
+    const inputs = {
+        chat: $id('modelChatInput'),
+        companion: $id('modelCompanionInput'),
+        memory: $id('modelMemoryInput'),
+        vision: $id('modelVisionInput')
+    };
+    const effectiveChat = providerModelName('chat', p);
+    MODEL_MODES.forEach(mode => {
+        const el = inputs[mode];
+        if (!el) return;
+        el.value = String(config[modelFieldKey(p, mode)] || '').trim();
+        if (mode === 'chat') {
+            el.placeholder = meta.defaultModel
+                ? `留空使用默认：${meta.defaultModel}`
+                : '如 qwen2.5-3b（留空由本地服务决定）';
+        } else {
+            el.placeholder = `空 = 用聊天模型（${effectiveChat || '服务端默认'}）`;
+        }
+    });
+    const dl = $id('modelOptionsList');
+    if (dl) {
+        const opts = modelOptionsFor(p);
+        dl.innerHTML = opts.map(n => `<option value="${String(n).replace(/"/g, '&quot;')}"></option>`).join('');
+    }
+    const hint = $id('modelHint');
+    if (hint) {
+        const parts = MODEL_MODES.map(m => {
+            const label = { chat: '聊天', companion: '陪伴', memory: '记忆', vision: '视觉' }[m];
+            return `${label}：${providerModelName(m, p) || '服务端默认'}`;
+        });
+        hint.textContent = `${providerDisplayName(p)} 当前生效 —— ${parts.join(' · ')}。可直接输入模型名，或点 🔄 拉取列表后下拉选择。`;
+    }
+}
+
+// 从服务商拉取可用模型列表（走主进程，避免渲染进程 CORS 限制）
+// showStatus=false 用于后台静默拉取（自动刷新下拉候选，不打扰用户）
+async function fetchProviderModels(showStatus = true) {
+    const $id = (id) => document.getElementById(id);
+    const hint = $id('modelHint');
+    const btn = $id('modelFetchBtn');
+    const p = config.multimodalProvider || 'deepseek';
+    if (modelFetching) return;
+    const cred = modelFetchCredentials(p);
+    if (!cred.apiUrl) {
+        if (showStatus && hint) hint.textContent = '请先填写 API 地址后再拉取模型列表。';
+        return;
+    }
+    // 云端提供商没有 Key 时不必请求，直接用内置候选
+    if (p !== 'local' && !cred.apiKey) {
+        if (showStatus && hint) hint.textContent = '请先填写 API Key 后再拉取模型列表（也可直接手动输入模型名）。';
+        return;
+    }
+    modelFetching = true;
+    if (btn) btn.disabled = true;
+    const prevHint = hint ? hint.textContent : '';
+    const restoreHint = () => { if (!showStatus && hint) hint.textContent = prevHint; };
+    if (showStatus && hint) hint.textContent = '正在从服务商拉取模型列表…';
+    try {
+        if (!window.electronAPI || !window.electronAPI.listModels) throw new Error('主进程不支持模型列表接口');
+        const res = await window.electronAPI.listModels({ provider: p, apiKey: cred.apiKey, apiUrl: cred.apiUrl });
+        const models = (res && Array.isArray(res.models)) ? res.models : [];
+        if (models.length) {
+            modelListCache[p] = models;
+            refreshModelUI();
+            if (showStatus && hint) {
+                hint.textContent = `已获取 ${models.length} 个模型（点击输入框可下拉选择）：` + models.slice(0, 8).join('、') + (models.length > 8 ? ' …' : '');
+            } else {
+                restoreHint();
+            }
+        } else if (showStatus && hint) {
+            hint.textContent = (res && res.message) ? `未获取到模型列表：${res.message}（可直接手动输入模型名）` : '未获取到模型列表，可直接手动输入模型名。';
+        } else {
+            restoreHint();
+        }
+    } catch (e) {
+        if (showStatus && hint) hint.textContent = '拉取模型列表失败：' + ((e && e.message) ? e.message : e) + '（可直接手动输入模型名）';
+        else restoreHint();
+    } finally {
+        modelFetching = false;
+        if (btn) btn.disabled = false;
+    }
+}
+
+// 兼容旧调用：填充本地模型下拉（现已并入统一模型选择区）
+async function fetchLocalModelsIntoDatalist() {
+    await fetchProviderModels(false);
+}
+
+// ===== 回退与重试区 =====
+// 各提供商的备选模型字段：deepseekFallbackModels / zhipuFallbackModels / local* / custom*
+function fallbackFieldKey(provider) {
+    return requireAIF().meta(provider).prefix + 'FallbackModels';
+}
+
+// 当前提供商的备选模型列表（保证是数组）
+function currentFallbackList(provider) {
+    const p = provider || config.multimodalProvider || 'deepseek';
+    const key = fallbackFieldKey(p);
+    if (!Array.isArray(config[key])) config[key] = [];
+    return config[key];
+}
+
+// 渲染备选模型列表 + 重试参数 + 实际尝试顺序预览
+function refreshFallbackUI() {
+    const p = config.multimodalProvider || 'deepseek';
+    const AI = requireAIF();
+    const policy = AI.retryPolicy(config);
+    if (aiMaxRetriesSlider) aiMaxRetriesSlider.value = String(policy.maxRetries);
+    if (aiMaxRetriesValue) aiMaxRetriesValue.textContent = policy.maxRetries === 0 ? '不重试' : String(policy.maxRetries);
+    if (aiRetryDelaySlider) aiRetryDelaySlider.value = String(policy.delayMs);
+    if (aiRetryDelayValue) aiRetryDelayValue.textContent = policy.delayMs + 'ms';
+    if (aiRetryBackoffToggle) aiRetryBackoffToggle.checked = !!policy.backoff;
+    if (crossProviderFallbackToggle) crossProviderFallbackToggle.checked = config.crossProviderFallback !== false;
+    if (deepThinkingToggle) deepThinkingToggle.checked = !!config.deepThinking;
+    if (agentEnabledToggle) agentEnabledToggle.checked = config.agentEnabled !== false;
+
+    const list = currentFallbackList(p);
+    if (fallbackModelList) {
+        if (!list.length) {
+            fallbackModelList.innerHTML = '<div class="memory-empty" style="font-size:12px;color:#aaa;padding:4px 2px;">还没有备选模型（可留空，仅用重试）</div>';
+        } else {
+            fallbackModelList.innerHTML = list.map((m, i) =>
+                `<div class="chain-item" data-i="${i}"><span style="flex:1;word-break:break-all;">${i + 1}. ${escapeHtml(m)}</span>` +
+                `<button class="chain-del" data-act="up" data-i="${i}" title="上移" ${i === 0 ? 'disabled style="opacity:.4"' : ''}>↑</button>` +
+                `<button class="chain-del" data-act="del" data-i="${i}" title="删除">删</button></div>`
+            ).join('');
+        }
+    }
+    if (fallbackHint) {
+        const chain = AI.buildChain(config, 'chat');
+        const chainLabel = (c) => (c.provider === p ? providerDisplayName(p) : AI.meta(c.provider).label);
+        const names = chain.map((c, i) => `${i + 1}.${chainLabel(c)}/${c.model || '(默认)'}`);
+        const retryText = policy.maxRetries > 0
+            ? `繁忙时先重试 ${policy.maxRetries} 次（间隔 ${policy.delayMs}ms${policy.backoff ? '，指数退避' : ''}）`
+            : '当前不重试，失败后直接换下一个候选';
+        fallbackHint.textContent = `${retryText}。实际尝试顺序：${names.length ? names.join(' → ') : '（未配置可用的提供商）'}`;
+    }
 }
 
 // 根据当前 AI 提供商刷新设置面板的 API Key / API 地址输入框与标签。
@@ -344,13 +1116,48 @@ function refreshMultimodalUI() {
     const keyLbl = $('apiKeyLabel');
     const keyInput = $('apiKeyInput');
     const urlInput = $('apiUrlInput');
-    const keyValue = provider === 'zhipu' ? (config.zhipuApiKey || '') : (config.apiKey || '');
-    const urlValue = provider === 'zhipu'
-        ? (config.zhipuApiUrl || def.url)
-        : (config.apiUrl || def.url);
-    if (keyLbl) keyLbl.textContent = def.keyLabel;
-    if (keyInput) { keyInput.value = keyValue; keyInput.placeholder = def.keyPlaceholder; }
-    if (urlInput) urlInput.value = urlValue;
+    // 本地 LLM / 自定义（中转站）各自使用独立 Key/地址输入框；云端提供商显示共享输入框
+    const sharedKeyItem = $('sharedKeyItem');
+    const sharedUrlItem = $('sharedUrlItem');
+    const localKeyItem = $('localKeyItem');
+    const localUrlItem = $('localUrlItem');
+    const localApiKeyInput = $('localApiKeyInput');
+    const localApiUrlInput = $('localApiUrlInput');
+    const customNameItem = $('customNameItem');
+    const customUrlItem = $('customUrlItem');
+    const customKeyItem = $('customKeyItem');
+    const customNameInput = $('customNameInput');
+    const customApiUrlInput = $('customApiUrlInput');
+    const customApiKeyInput = $('customApiKeyInput');
+    const isLocal = provider === 'local';
+    const isCustom = provider === 'custom';
+    if (sharedKeyItem) sharedKeyItem.style.display = (isLocal || isCustom) ? 'none' : '';
+    if (sharedUrlItem) sharedUrlItem.style.display = (isLocal || isCustom) ? 'none' : '';
+    if (localKeyItem) localKeyItem.style.display = isLocal ? '' : 'none';
+    if (localUrlItem) localUrlItem.style.display = isLocal ? '' : 'none';
+    if (customNameItem) customNameItem.style.display = isCustom ? '' : 'none';
+    if (customUrlItem) customUrlItem.style.display = isCustom ? '' : 'none';
+    if (customKeyItem) customKeyItem.style.display = isCustom ? '' : 'none';
+    if (isLocal) {
+        if (localApiUrlInput) localApiUrlInput.value = config.localApiUrl || def.url;
+        if (localApiKeyInput) localApiKeyInput.value = config.localApiKey || '';
+    } else if (isCustom) {
+        if (customNameInput) customNameInput.value = config.customName || '';
+        if (customApiUrlInput) customApiUrlInput.value = config.customApiUrl || '';
+        if (customApiKeyInput) customApiKeyInput.value = config.customApiKey || '';
+    } else {
+        const keyValue = provider === 'zhipu' ? (config.zhipuApiKey || '') : (config.apiKey || '');
+        const urlValue = provider === 'zhipu'
+            ? (config.zhipuApiUrl || def.url)
+            : (config.apiUrl || def.url);
+        if (keyLbl) keyLbl.textContent = def.keyLabel;
+        if (keyInput) { keyInput.value = keyValue; keyInput.placeholder = def.keyPlaceholder; }
+        if (urlInput) urlInput.value = urlValue;
+    }
+    // 模型选择区（所有提供商通用：聊天 / 陪伴 / 记忆 / 视觉）
+    refreshModelUI();
+    // 回退与重试区（备选模型按提供商分开存储）
+    refreshFallbackUI();
 }
 
 // 仅刷新设置面板控件的显示值（不重新绑定事件/不重拉音色与贴图包），
@@ -360,6 +1167,11 @@ function refreshSettingsValues() {
     const setVal = (id, val, labelId) => { const el = $(id); if (el) el.value = val; if (labelId) { const l = $(labelId); if (l) l.textContent = val; } };
     const setCheck = (id, val) => { const el = $(id); if (el) el.checked = !!val; };
 
+    // 外观主题（标记当前色块选中态）
+    applyTheme(config.theme || 'purple');
+    // 外观与材质（背景 / 毛玻璃 / 风格 / 深色）：控件回填并重算令牌
+    refreshAppearanceUI();
+    applyAppearance();
     // 浮窗
     setVal('floatPetSizeSlider', config.floatPetSize || 80, 'floatPetSizeValue');
     const fms = $('floatMoveModeSelect'); if (fms) fms.value = config.floatMoveMode || 'free';
@@ -398,6 +1210,18 @@ function refreshSettingsValues() {
     setVal('furnitureSizeSlider', config.furnitureSize != null ? config.furnitureSize : 3.8, 'furnitureSizeValue');
     setVal('buttonSizeSlider', config.buttonSize != null ? config.buttonSize : 40, 'buttonSizeValue');
     setVal('companionWidthSlider', config.companionWidth != null ? config.companionWidth : 400, 'companionWidthValue');
+    // 陪伴模式数值体系回填（与 initSettingsPanel 内的回填保持一致，避免被覆盖"变回"）
+    setVal('companionFontSizeSlider', config.companionFontSize || 14, 'companionFontSizeValue');
+    setVal('companionPetSizeSlider', config.companionPetSize || 180, 'companionPetSizeValue');
+    const cThFreq = $('companionThoughtFreqSelect'); if (cThFreq) cThFreq.value = config.companionThoughtFreq || 'low';
+    setCheck('companionThoughtVisibleToggle', config.companionThoughtVisible);
+    setVal('companionTalkThresholdSlider', config.companionTalkThreshold != null ? config.companionTalkThreshold : 54, 'companionTalkThresholdValue');
+    const cSens = $('companionScreenSensitivitySelect'); if (cSens) cSens.value = config.companionScreenSensitivity || 'medium';
+    // [companion-debug] 回填时打印，确认返回到 UI 的值来源
+    console.log('[companion-debug][refreshSettingsValues] from config.f', config.companionFontSize,
+        ' petSize', config.companionPetSize, ' thFreq', config.companionThoughtFreq,
+        ' thVis', config.companionThoughtVisible, ' thr', config.companionTalkThreshold,
+        ' sens', config.companionScreenSensitivity);
 
     renderChains();
     renderMemoryList();
@@ -676,8 +1500,86 @@ setInterval(() => {
 
 // ===== 设置面板（float.html?mode=settings 独立窗口）=====
 function initSettingsPanel() {
+    console.log('[companion-debug][initSettingsPanel] START');
     const $ = (id) => document.getElementById(id);
     const on = (node, evt, fn) => { if (node) node.addEventListener(evt, fn); };
+
+    // ===== 外观主题色块：点击即切换 + 持久化（仅改反馈层，不影响其它逻辑）=====
+    const themeSwatches = $('themeSwatches');
+    on(themeSwatches, 'click', (evt) => {
+        const btn = evt.target && evt.target.closest ? evt.target.closest('.theme-swatch') : null;
+        if (!btn) return;
+        const name = btn.dataset.themeName;
+        if (!name) return;
+        config.theme = name;
+        applyTheme(name);
+        saveConfig();
+    });
+
+    // ===== 外观与材质（窗口背景 / 毛玻璃 / 风格语言）=====
+    // 控件值 → 令牌 → 持久化；与业务逻辑完全无关
+    refreshAppearanceUI();
+    initAppearanceControls();
+    // ===== 信息架构：左导航 + 右内容 + 顶部搜索 =====
+    initSettingsLayout();
+
+    // ===== 陪伴模式控件统一事件委托（不依赖后续绑定是否执行）=====
+    // 用 document 级 input/change 委托，按 id 分发：即使下方 initSettingsPanel 的同步绑定
+    // 因为任何异常中断，这里也已生效，保证拖动滑块 / 切换下拉立即更新 config 并保存。
+    const onCompanionInput = (evt) => {
+        const t = evt.target;
+        if (!t || !t.id) return;
+        const change = vi => {
+            if (vi === undefined) return;
+            try {
+                saveConfig();
+            } catch (e) { console.warn('[companion-debug] save err', e); }
+        };
+        switch (t.id) {
+            case 'companionWidthSlider':
+                config.companionWidth = Number(t.value);
+                { const l = document.getElementById('companionWidthValue'); if (l) l.textContent = t.value; }
+                change(config.companionWidth);
+                break;
+            case 'companionFontSizeSlider':
+                config.companionFontSize = Number(t.value);
+                { const l = document.getElementById('companionFontSizeValue'); if (l) l.textContent = t.value; }
+                change(config.companionFontSize);
+                if (window.electronAPI && window.electronAPI.send) window.electronAPI.send('set-companion-font-size', Number(t.value));
+                break;
+            case 'companionPetSizeSlider':
+                config.companionPetSize = Number(t.value);
+                { const l = document.getElementById('companionPetSizeValue'); if (l) l.textContent = t.value; }
+                change(config.companionPetSize);
+                if (window.electronAPI && window.electronAPI.send) window.electronAPI.send('set-companion-pet-size', Number(t.value));
+                break;
+            case 'companionThoughtFreqSelect':
+                config.companionThoughtFreq = t.value;
+                // 频率非 off 时视为"思考已启用"（companion 端 thinkTick 依赖此开关）
+                config.companionThoughtEnabled = t.value !== 'off';
+                change(config.companionThoughtFreq);
+                break;
+            case 'companionThoughtVisibleToggle':
+                config.companionThoughtVisible = t.checked;
+                change(config.companionThoughtVisible);
+                break;
+            case 'companionTalkThresholdSlider':
+                config.companionTalkThreshold = Number(t.value);
+                { const l = document.getElementById('companionTalkThresholdValue'); if (l) l.textContent = t.value; }
+                change(config.companionTalkThreshold);
+                break;
+            case 'companionScreenSensitivitySelect':
+                config.companionScreenSensitivity = t.value;
+                change(config.companionScreenSensitivity);
+                break;
+            default:
+                return;
+        }
+        console.log('[companion-debug][delegated] id=' + t.id + ' value=' + (t.value !== undefined ? t.value : t.checked));
+    };
+    document.addEventListener('input', onCompanionInput);
+    document.addEventListener('change', onCompanionInput);
+    console.log('[companion-debug] companion delegated listener registered');
 
     const floatPetSizeSlider = $('floatPetSizeSlider');
     const floatPetSizeValue = $('floatPetSizeValue');
@@ -699,6 +1601,35 @@ function initSettingsPanel() {
     const apiTestResult = $('apiTestResult');
     const multimodalToggle = $('multimodalToggle');
     const aiProviderSelect = $('aiProviderSelect');
+    const sharedKeyItem = $('sharedKeyItem');
+    const sharedUrlItem = $('sharedUrlItem');
+    const localKeyItem = $('localKeyItem');
+    const localUrlItem = $('localUrlItem');
+    const localApiKeyInput = $('localApiKeyInput');
+    const localApiUrlInput = $('localApiUrlInput');
+    // 模型选择区（所有提供商通用）
+    const modelChatInput = $('modelChatInput');
+    const modelCompanionInput = $('modelCompanionInput');
+    const modelMemoryInput = $('modelMemoryInput');
+    const modelVisionInput = $('modelVisionInput');
+    const modelFetchBtn = $('modelFetchBtn');
+    // 自定义 / 中转站
+    const customNameInput = $('customNameInput');
+    const customApiUrlInput = $('customApiUrlInput');
+    const customApiKeyInput = $('customApiKeyInput');
+    // 回退与重试
+    const aiMaxRetriesSlider = $('aiMaxRetriesSlider');
+    const aiMaxRetriesValue = $('aiMaxRetriesValue');
+    const aiRetryDelaySlider = $('aiRetryDelaySlider');
+    const aiRetryDelayValue = $('aiRetryDelayValue');
+    const aiRetryBackoffToggle = $('aiRetryBackoffToggle');
+    const crossProviderFallbackToggle = $('crossProviderFallbackToggle');
+    const deepThinkingToggle = $('deepThinkingToggle');
+    const agentEnabledToggle = $('agentEnabledToggle');
+    const fallbackModelInput = $('fallbackModelInput');
+    const fallbackAddBtn = $('fallbackAddBtn');
+    const fallbackModelList = $('fallbackModelList');
+    const fallbackHint = $('fallbackHint');
     const aiPromptInput = $('aiPromptInput');
     const aiReplyLengthSlider = $('aiReplyLengthSlider');
     const aiReplyLengthValue = $('aiReplyLengthValue');
@@ -739,6 +1670,16 @@ function initSettingsPanel() {
     const buttonSizeValue = $('buttonSizeValue');
     const companionWidthSlider = $('companionWidthSlider');
     const companionWidthValue = $('companionWidthValue');
+    // 陪伴模式数值体系控件
+    const companionFontSizeSlider = $('companionFontSizeSlider');
+    const companionFontSizeValue = $('companionFontSizeValue');
+    const companionPetSizeSlider = $('companionPetSizeSlider');
+    const companionPetSizeValue = $('companionPetSizeValue');
+    const companionThoughtFreqSelect = $('companionThoughtFreqSelect');
+    const companionThoughtVisibleToggle = $('companionThoughtVisibleToggle');
+    const companionTalkThresholdSlider = $('companionTalkThresholdSlider');
+    const companionTalkThresholdValue = $('companionTalkThresholdValue');
+    const companionScreenSensitivitySelect = $('companionScreenSensitivitySelect');
 
     // 同步家里专属设置到主进程并广播（让主窗口实时生效）
     function syncHomeSettings() {
@@ -774,6 +1715,8 @@ function initSettingsPanel() {
     if (multimodalToggle) multimodalToggle.checked = !!config.multimodalEnabled;
     if (aiProviderSelect) aiProviderSelect.value = config.multimodalProvider || 'deepseek';
     refreshMultimodalUI();
+    // 打开设置面板时静默拉取一次当前提供商的模型列表，填充下拉候选（失败则只保留内置候选）
+    setTimeout(() => { fetchProviderModels(false); }, 0);
     if (aiPromptInput) aiPromptInput.value = config.aiPrompt || '';
     if (voiceToggle) voiceToggle.checked = config.voiceEnabled !== false;
     if (volumeSlider) {
@@ -814,6 +1757,19 @@ function initSettingsPanel() {
         companionWidthSlider.value = config.companionWidth != null ? config.companionWidth : 400;
         if (companionWidthValue) companionWidthValue.textContent = companionWidthSlider.value;
     }
+    // 陪伴模式数值体系设置回填
+    const cfSize = $('companionFontSizeSlider'), cfSizeVal = $('companionFontSizeValue');
+    if (cfSize) { cfSize.value = config.companionFontSize || 14; if (cfSizeVal) cfSizeVal.textContent = config.companionFontSize || 14; }
+    const cpSize = $('companionPetSizeSlider'), cpSizeVal = $('companionPetSizeValue');
+    if (cpSize) { cpSize.value = config.companionPetSize || 180; if (cpSizeVal) cpSizeVal.textContent = config.companionPetSize || 180; }
+    const cThFreq = $('companionThoughtFreqSelect');
+    if (cThFreq) cThFreq.value = config.companionThoughtFreq || 'low';
+    const cThVis = $('companionThoughtVisibleToggle');
+    if (cThVis) cThVis.checked = !!config.companionThoughtVisible;
+    const cThreshold = $('companionTalkThresholdSlider'), cThresholdVal = $('companionTalkThresholdValue');
+    if (cThreshold) { cThreshold.value = config.companionTalkThreshold != null ? config.companionTalkThreshold : 54; if (cThresholdVal) cThresholdVal.textContent = cThreshold.value; }
+    const cSens = $('companionScreenSensitivitySelect');
+    if (cSens) cSens.value = config.companionScreenSensitivity || 'medium';
 
     // 语音音色列表
     if (voiceSelect) {
@@ -952,12 +1908,16 @@ function initSettingsPanel() {
         if (def) {
             if (config.multimodalProvider === 'zhipu') {
                 if (!config.zhipuApiUrl) config.zhipuApiUrl = def.url;
+            } else if (config.multimodalProvider === 'local') {
+                if (!config.localApiUrl) config.localApiUrl = def.url;
             } else {
                 if (!config.apiUrl) config.apiUrl = def.url;
             }
         }
         refreshMultimodalUI();
         saveConfig();
+        // 切换提供商后自动拉取该提供商的可用模型列表（失败不影响手动输入）
+        fetchProviderModels(false);
     });
     // AI 回复最大字数（0 表示不限制）
     on(aiReplyLengthSlider, 'input', () => {
@@ -972,6 +1932,8 @@ function initSettingsPanel() {
         if (config.multimodalProvider === 'zhipu') {
             config.zhipuApiKey = v;
             if (window.electronAPI && window.electronAPI.setZhipuKey) window.electronAPI.setZhipuKey(v);
+        } else if (config.multimodalProvider === 'local') {
+            config.localApiKey = v;
         } else {
             config.apiKey = v;
         }
@@ -981,11 +1943,136 @@ function initSettingsPanel() {
         const v = apiUrlInput.value.trim();
         if (config.multimodalProvider === 'zhipu') {
             config.zhipuApiUrl = v || mmProviderDefaults().zhipu.url;
+        } else if (config.multimodalProvider === 'local') {
+            config.localApiUrl = v || mmProviderDefaults().local.url;
         } else {
             config.apiUrl = v || mmProviderDefaults().deepseek.url;
         }
         saveConfig();
     });
+    // 本地 LLM 独立 Key/地址（与 DeepSeek/智谱完全分离，各自存各自的字段）
+    if (localApiKeyInput) {
+        on(localApiKeyInput, 'change', () => {
+            config.localApiKey = localApiKeyInput.value.trim();
+            saveConfig();
+        });
+    }
+    if (localApiUrlInput) {
+        on(localApiUrlInput, 'change', () => {
+            config.localApiUrl = localApiUrlInput.value.trim() || mmProviderDefaults().local.url;
+            saveConfig();
+            // 地址变化后刷新模型下拉（本地服务 /models 列表）
+            fetchLocalModelsIntoDatalist();
+        });
+    }
+    // ===== 模型选择：所有提供商都可自主选择模型（空 = 回退聊天模型 / 提供商默认）=====
+    [
+        ['modelChatInput', 'chat'],
+        ['modelCompanionInput', 'companion'],
+        ['modelMemoryInput', 'memory'],
+        ['modelVisionInput', 'vision']
+    ].forEach(([elId, mode]) => {
+        const el = $el(elId);
+        if (!el) return;
+        on(el, 'change', () => {
+            const p = config.multimodalProvider || 'deepseek';
+            config[modelFieldKey(p, mode)] = String(el.value || '').trim();
+            saveConfig();
+            refreshModelUI();
+        });
+    });
+    if (modelFetchBtn) {
+        on(modelFetchBtn, 'click', () => { fetchProviderModels(true); });
+    }
+    // ===== 自定义 / 中转站：地址与 Key 独立存储，互不影响其它提供商 =====
+    if (customNameInput) {
+        on(customNameInput, 'change', () => {
+            config.customName = customNameInput.value.trim();
+            saveConfig(); refreshModelUI(); refreshFallbackUI();
+        });
+    }
+    if (customApiUrlInput) {
+        on(customApiUrlInput, 'change', () => {
+            config.customApiUrl = customApiUrlInput.value.trim();
+            saveConfig();
+            // 地址变化后尝试拉取该中转站可用的模型列表
+            fetchProviderModels(false);
+        });
+    }
+    if (customApiKeyInput) {
+        on(customApiKeyInput, 'change', () => {
+            config.customApiKey = customApiKeyInput.value.trim();
+            saveConfig();
+            fetchProviderModels(false);
+        });
+    }
+    // ===== 回退与重试 =====
+    if (aiMaxRetriesSlider) {
+        on(aiMaxRetriesSlider, 'input', () => {
+            config.aiMaxRetries = Number(aiMaxRetriesSlider.value);
+            saveConfig(); refreshFallbackUI();
+        });
+    }
+    if (aiRetryDelaySlider) {
+        on(aiRetryDelaySlider, 'input', () => {
+            config.aiRetryDelayMs = Number(aiRetryDelaySlider.value);
+            saveConfig(); refreshFallbackUI();
+        });
+    }
+    if (aiRetryBackoffToggle) {
+        on(aiRetryBackoffToggle, 'change', () => {
+            config.aiRetryBackoff = aiRetryBackoffToggle.checked;
+            saveConfig(); refreshFallbackUI();
+        });
+    }
+    if (crossProviderFallbackToggle) {
+        on(crossProviderFallbackToggle, 'change', () => {
+            config.crossProviderFallback = crossProviderFallbackToggle.checked;
+            saveConfig(); refreshFallbackUI();
+        });
+    }
+    // 深度思考开关（先 <think> 再输出）
+    if (deepThinkingToggle) {
+        on(deepThinkingToggle, 'change', () => {
+            config.deepThinking = deepThinkingToggle.checked;
+            saveConfig();
+        });
+    }
+    // Agent 开关（关闭后不提供 tools，模型只能纯文本回复）
+    if (agentEnabledToggle) {
+        on(agentEnabledToggle, 'change', () => {
+            config.agentEnabled = agentEnabledToggle.checked;
+            saveConfig();
+        });
+    }
+    // 备选模型：添加 / 删除 / 上移（列表按顺序即为尝试顺序）
+    const addFallbackModel = () => {
+        const v = (fallbackModelInput ? fallbackModelInput.value : '').trim();
+        if (!v) return;
+        const list = currentFallbackList();
+        if (list.indexOf(v) === -1) list.push(v);
+        if (fallbackModelInput) fallbackModelInput.value = '';
+        saveConfig(); refreshFallbackUI();
+    };
+    if (fallbackAddBtn) on(fallbackAddBtn, 'click', addFallbackModel);
+    if (fallbackModelInput) {
+        on(fallbackModelInput, 'keydown', (e) => {
+            if (e && e.key === 'Enter') { e.preventDefault(); addFallbackModel(); }
+        });
+    }
+    if (fallbackModelList) {
+        on(fallbackModelList, 'click', (e) => {
+            const btn = e.target && e.target.closest ? e.target.closest('button[data-act]') : null;
+            if (!btn) return;
+            const i = Number(btn.getAttribute('data-i'));
+            const list = currentFallbackList();
+            if (!(i >= 0 && i < list.length)) return;
+            const act = btn.getAttribute('data-act');
+            if (act === 'del') list.splice(i, 1);
+            else if (act === 'up' && i > 0) { const tmp = list[i - 1]; list[i - 1] = list[i]; list[i] = tmp; }
+            saveConfig(); refreshFallbackUI();
+        });
+    }
     on(aiPromptInput, 'change', () => {
         config.aiPrompt = aiPromptInput.value;
         saveConfig();
@@ -1017,14 +2104,26 @@ function initSettingsPanel() {
     on(testApiBtn, 'click', async () => {
         if (!apiTestResult) return;
         const provider = (aiProviderSelect && aiProviderSelect.value) || config.multimodalProvider || 'deepseek';
-        const url = (apiUrlInput && apiUrlInput.value.trim()) || '';
-        const key = (apiKeyInput && apiKeyInput.value.trim()) || '';
+        // 本地 LLM / 自定义（中转站）各自使用独立输入框（不与 DeepSeek/智谱共享 Key/地址）
+        const url = provider === 'local'
+            ? ((localApiUrlInput && localApiUrlInput.value.trim()) || '')
+            : provider === 'custom'
+                ? ((customApiUrlInput && customApiUrlInput.value.trim()) || '')
+                : ((apiUrlInput && apiUrlInput.value.trim()) || '');
+        const key = provider === 'local'
+            ? ((localApiKeyInput && localApiKeyInput.value.trim()) || '')
+            : provider === 'custom'
+                ? ((customApiKeyInput && customApiKeyInput.value.trim()) || '')
+                : ((apiKeyInput && apiKeyInput.value.trim()) || '');
+        // 本地 LLM：Key 可选；模型名随测试请求传出（Ollama 必填）
+        // 云端提供商：使用「模型选择」里填写的模型（留空则用提供商默认）
+        const testModel = currentModelFromForm('chat', provider);
         apiTestResult.style.display = 'block';
         apiTestResult.style.color = '#888';
         apiTestResult.textContent = '测试中，请稍候...';
         testApiBtn.disabled = true;
         try {
-            const res = await window.electronAPI.testApi({ provider: provider, apiKey: key, apiUrl: url });
+            const res = await window.electronAPI.testApi({ provider: provider, apiKey: key, apiUrl: url, model: testModel });
             const ok = !!(res && res.ok);
             apiTestResult.style.color = ok ? '#2e9e5b' : '#e05b5b';
             apiTestResult.textContent =
@@ -1057,7 +2156,7 @@ function initSettingsPanel() {
             const overlay = document.createElement('div');
             overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;';
             const box = document.createElement('div');
-            box.style.cssText = 'background:#fff;border-radius:10px;padding:16px;width:280px;box-shadow:0 6px 24px rgba(0,0,0,0.25);font-family:sans-serif;';
+            box.style.cssText = 'background:var(--surface);border-radius:10px;padding:16px;width:280px;box-shadow:0 6px 24px rgba(0,0,0,0.25);font-family:sans-serif;';
             box.innerHTML =
                 '<div style="font-size:13px;color:#333;margin-bottom:10px;">请输入这张图片的记忆描述（必填）：</div>' +
                 '<input type="text" id="memDescInput" style="width:100%;box-sizing:border-box;padding:6px 8px;border:1px solid #ccc;border-radius:6px;font-size:13px;" placeholder="例如：用户的宠物照片" />' +
@@ -1306,6 +2405,46 @@ function initSettingsPanel() {
         config.buttonSize = Number(buttonSizeSlider.value);
         if (buttonSizeValue) buttonSizeValue.textContent = buttonSizeSlider.value;
         saveConfig(); syncHomeSettings();
+    });
+    // 陪伴窗口宽度：补上输入监听（此前只有回填无绑定，导致改了不保存）
+    on(companionWidthSlider, 'input', () => {
+        config.companionWidth = Number(companionWidthSlider.value);
+        if (companionWidthValue) companionWidthValue.textContent = companionWidthSlider.value;
+        saveConfig(); syncHomeSettings();
+    });
+    // 陪伴模式数值体系设置绑定
+    console.log('[companion-debug][initSettingsPanel] reached companion bindings');
+    // [companion-debug] 打印这些控件是否在 DOM 中找到（null 则 on() 静默跳过绑定）
+    console.log('[companion-debug][bind companion controls]',
+        'fontSize=', !!companionFontSizeSlider, 'petSize=', !!companionPetSizeSlider,
+        'freqSel=', !!companionThoughtFreqSelect, 'visTgl=', !!companionThoughtVisibleToggle,
+        'threshold=', !!companionTalkThresholdSlider, 'sensSel=', !!companionScreenSensitivitySelect);
+    on(companionFontSizeSlider, 'input', () => {
+        config.companionFontSize = Number(companionFontSizeSlider.value);
+        if (companionFontSizeValue) companionFontSizeValue.textContent = companionFontSizeSlider.value;
+        saveConfig();
+    });
+    on(companionPetSizeSlider, 'input', () => {
+        config.companionPetSize = Number(companionPetSizeSlider.value);
+        if (companionPetSizeValue) companionPetSizeValue.textContent = companionPetSizeSlider.value;
+        saveConfig();
+    });
+    on(companionThoughtFreqSelect, 'change', () => {
+        config.companionThoughtFreq = companionThoughtFreqSelect.value;
+        saveConfig();
+    });
+    on(companionThoughtVisibleToggle, 'change', () => {
+        config.companionThoughtVisible = companionThoughtVisibleToggle.checked;
+        saveConfig();
+    });
+    on(companionTalkThresholdSlider, 'input', () => {
+        config.companionTalkThreshold = Number(companionTalkThresholdSlider.value);
+        if (companionTalkThresholdValue) companionTalkThresholdValue.textContent = companionTalkThresholdSlider.value;
+        saveConfig();
+    });
+    on(companionScreenSensitivitySelect, 'change', () => {
+        config.companionScreenSensitivity = companionScreenSensitivitySelect.value;
+        saveConfig();
     });
     renderChains();
     renderMemoryList();
@@ -1641,6 +2780,44 @@ function memoryImageSrc(m) {
         }
     }
     return '';
+}
+
+// ===== 记忆总结遮罩（总结期间隐藏关闭按钮 + 友好的"整理中"提示）=====
+function showMemorySummaryOverlay() {
+    if (!isChatMode || !document.body) return;
+    const btn = document.getElementById('chatCloseBtn');
+    if (btn) { btn.dataset.hiddenBySummary = '1'; btn.style.display = 'none'; }
+    if (document.getElementById('memorySummaryOverlay')) return;
+    const style = document.createElement('style');
+    style.id = 'memorySummaryStyle';
+    style.textContent =
+        '#memorySummaryOverlay{position:absolute;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+        'gap:14px;background:linear-gradient(160deg,color-mix(in srgb,var(--surface) 96%,transparent),color-mix(in srgb,var(--brand-soft) 96%,transparent));backdrop-filter:blur(6px);' +
+        'font:14px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--brand-text);animation:msFadeIn .22s ease;}' +
+        '@keyframes msFadeIn{from{opacity:0}to{opacity:1}}' +
+        '#memorySummaryOverlay .ms-ring{width:54px;height:54px;border-radius:50%;' +
+        'border:3px solid color-mix(in srgb, var(--brand) 18%, transparent);border-top-color:var(--brand);animation:msSpin .9s linear infinite;}' +
+        '@keyframes msSpin{to{transform:rotate(360deg)}}' +
+        '#memorySummaryOverlay .ms-title{font-size:15px;font-weight:600;letter-spacing:.5px;color:var(--brand-text);}' +
+        '#memorySummaryOverlay .ms-sub{font-size:12px;color:var(--text-muted);}' +
+        '#memorySummaryOverlay .ms-dots::after{content:"";animation:msDots 1.4s steps(4,end) infinite;}' +
+        '@keyframes msDots{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}';
+    document.head.appendChild(style);
+    const box = document.createElement('div');
+    box.id = 'memorySummaryOverlay';
+    box.innerHTML =
+        '<div class="ms-ring"></div>' +
+        '<div class="ms-title">正在整理这段对话的记忆<span class="ms-dots"></span></div>' +
+        '<div class="ms-sub">把值得长期记住的内容收好，稍等一下就好</div>';
+    const host = document.getElementById('chatContainer') || document.body;
+    host.appendChild(box);
+}
+
+function hideMemorySummaryOverlay() {
+    const box = document.getElementById('memorySummaryOverlay');
+    if (box && box.parentNode) box.parentNode.removeChild(box);
+    const btn = document.getElementById('chatCloseBtn');
+    if (btn && btn.dataset.hiddenBySummary) { btn.style.display = ''; delete btn.dataset.hiddenBySummary; }
 }
 
 // 删除一条记忆：图像记忆额外调用 DELETE /files/{file_id} 并清理本地缓存
@@ -2160,14 +3337,13 @@ if (isSettingsMode) {
 
         const dist = Math.sqrt(dx * dx + dy * dy);
 
-        if (dist < BUBBLE_SHOW_DISTANCE) {
-            floatBubble.classList.add('show');
-        } else {
-            floatBubble.classList.remove('show');
-        }
-        // 鼠标靠近（四按钮显示）时隐藏 DSH 任务面板，避免遮挡
-        taskPanelHovering = dist < BUBBLE_SHOW_DISTANCE;
-        if (applyTaskPanelHover) applyTaskPanelHover(taskPanelHovering);
+        // 桌宠模式不再在鼠标靠近时弹出 2×2 按钮气泡：
+        // 那四个动作（聊天 / 设置 / 回家 / 陪伴）现在是窗口底部的常驻动作条，
+        // 弹出的气泡既重复又会被右侧的 DSH 任务面板压住。
+        // 同时，DSH 任务面板也不再为「上方的按钮」让位（只保留 hoverGap 的常规位置）。
+        if (floatBubble) floatBubble.classList.remove('show');
+        taskPanelHovering = false;
+        if (applyTaskPanelHover) applyTaskPanelHover(false);
 
         const wasHovering = isMouseHovering;
         isMouseHovering = dist < HOVER_STOP_DISTANCE;
@@ -2222,22 +3398,38 @@ if (isSettingsMode) {
     });
 
     // 获取容器尺寸
-    // 桌宠脚部与窗口下边的间距（必须与 updateWindowSize 的 --float-pet-bottom 一致）
+    // 桌宠脚部与窗口下边的间距（必须与 .float-pet 的 CSS calc 一致）
+    // 竖向堆叠：状态条 → 间距 → 动作条 → 间距
+    // 获取容器尺寸
+    // 桌宠脚部与窗口下边的间距（必须与 .float-pet 的 CSS calc 一致）
+    // 竖向堆叠：状态条 → 间距 → 动作条 → 间距（+ 用户设置的「贴图与按钮间距」）
     function getPetBottomGap() {
-        return Math.max(4, Math.ceil(currentPetSize * 0.05)) + floatPetBottomOffset;
+        return PET_STAT_H + PET_STAT_ACTION_GAP + petActionH() + PET_ACTION_PET_GAP
+            + floatPetBottomOffset;
     }
-    // 顶部为聊天气泡预留的高度（气泡 + 与桌宠头部的间隔）
-    function getBubbleBand() {
-        return Math.ceil(currentPetSize * 1.05) + 10 + floatBubbleOffset;
+    /// 底部动作条高度：由设置里的「按钮大小」派生（按钮边长 + 上下各一点留白）
+    function petActionH() {
+        const s = Number(config && config.buttonSize);
+        const size = Number.isFinite(s) && s > 0 ? s : PET_BUTTON_SIZE_DEFAULT;
+        return Math.round(size) + PET_ACTION_BUTTON_PAD;
+    }
+    /// 贴图上方给 DSH 任务面板的高度：面板隐藏时收起来，
+    /// 这样窗口上边缘会自己下移（窗口贴底，顶边就是可见边界）。
+    function dshPanelHeadroom() {
+        const panel = document.getElementById('dshTaskPanel');
+        return (panel && !panel.classList.contains('dsh-hide')) ? PET_HEADROOM : PET_HEADROOM_HIDDEN;
     }
     // —— 窗口尺寸唯一来源：updateWindowSize()/physics/碰撞都用这里，保证与实际窗口一致 —
     function getContainerWidth() {
         const bubbleWidth = 200; // 与 float.css 中 .float-bubble 的 width 保持一致
+        const actionBarWidth = 172; // 四个按钮 + 间距 + 内边距，必须与 .pet-action-bar 一致
         const sidePad = Math.ceil(currentPetSize * 0.5);
-        return Math.max(currentPetSize + sidePad * 2, bubbleWidth);
+        return Math.max(currentPetSize + sidePad * 2, bubbleWidth, actionBarWidth);
     }
     function getContainerHeight() {
-        return getPetBottomGap() + currentPetSize + getBubbleBand() + floatWindowHeightPad;
+        // 贴图上方额外留出 PET_HEADROOM：DSH 任务面板浮在贴图头部之上，
+        // 窗口不留这条带的话面板可用高度会被算成 0（弹出来也看不见）。
+        return getPetBottomGap() + currentPetSize + dshPanelHeadroom() + floatWindowHeightPad;
     }
 
     // 桌宠贴图底部/顶部相对于窗口顶部的偏移量（贴合窗口下边缘的可视位置）
@@ -2431,7 +3623,16 @@ if (isSettingsMode) {
         document.querySelector('.float-container').style.height = h + 'px';
         document.documentElement.style.setProperty('--float-pet-bottom', bottomGap + 'px');
         document.documentElement.style.setProperty('--float-pet-size', currentPetSize + 'px');
-        document.documentElement.style.setProperty('--float-bubble-offset', floatBubbleOffset + 'px');
+        // --float-bubble-offset 已废弃：鼠标靠近弹出的四按钮气泡已由底部常驻动作条取代
+        // 常驻动作条高度（CSS 里以 --pet-action-h 抬升贴图与状态条）
+        document.documentElement.style.setProperty('--pet-action-h', petActionH() + 'px');
+        document.documentElement.style.setProperty('--pet-action-btn-size', (petActionH() - PET_ACTION_BUTTON_PAD) + 'px');
+        // 贴图与按钮条的间距 = 默认值 + 用户设置的「贴图位置偏移」
+        document.documentElement.style.setProperty('--pet-action-gap', Math.max(0, PET_ACTION_PET_GAP + floatPetBottomOffset) + 'px');
+        // 窗口尺寸变了，DSH 任务面板的像素定位要跟着重算（依赖 --float-pet-bottom）
+        if (document.getElementById('dshTaskPanel') && typeof applyDshPanelStyle === 'function') {
+            try { applyDshPanelStyle(); } catch (e) { /* 面板尚未初始化 */ }
+        }
 
         if (window.electronAPI && window.electronAPI.resizeFloatWindow) {
             window.electronAPI.resizeFloatWindow(w, h);
@@ -3490,7 +4691,14 @@ async function loadMemory() {
 async function addMemoryItem(text) {
     if (text && text.trim()) {
         memoryItems.push({ text: text.trim() });
-        await window.electronAPI.saveMemoryItem(text.trim());
+        // 转发给主窗口只做同步展示；失败不能影响记忆写入（真正的持久化由 memorySave 负责）
+        try {
+            if (window.electronAPI && window.electronAPI.saveMemoryItem) {
+                await window.electronAPI.saveMemoryItem(text.trim());
+            }
+        } catch (e) {
+            console.warn('[float] saveMemoryItem 转发失败（不影响本地记忆）:', e && e.message);
+        }
     }
 }
 
@@ -3533,26 +4741,145 @@ function parseStateFromReply(reply) {
     return null;
 }
 
-// 将消息 content（可能是字符串 or 文本/图片块数组）展平为纯文本，file_id 以 [截图:<id>] 标注
+// 将消息 content（可能是字符串 or 文本/图片块数组）展平为纯文本。
+// 注意：**任何非文本块都只回占位符，绝不 JSON.stringify**——
+// 图片块里是十几万字符的 data URL，一旦被序列化就会污染记忆、日志与保存的聊天记录
+// （曾出现"我喜欢群青色 {"type":"image_url","image_url":{"url":"data:image/jp"这种记忆）。
 function flattenMessageContent(content) {
     if (typeof content === 'string') return content;
     if (Array.isArray(content)) {
         return content.map(b => {
             if (!b) return '';
+            if (typeof b === 'string') return b;
             if (b.type === 'text') return b.text || '';
-            if (b.type === 'file') return `[截图:${b.file_id || '?'}]`;
-            return JSON.stringify(b);
-        }).join('\n');
+            if (b.type === 'file') return '[截图]';
+            if (b.type === 'image_url' || b.image_url || (typeof b.type === 'string' && /image/i.test(b.type))) return '[截图]';
+            // 其它未知块：只取它可能带的文本字段，取不到就给空，绝不序列化
+            return typeof b.text === 'string' ? b.text : '';
+        }).filter(Boolean).join('\n');
     }
     return String(content == null ? '' : content);
 }
 
-// 删除本次对话中未被保留（keepSet 之外）的截图：远程 DELETE /files/{file_id} + 本地缓存
+// 记忆文本清洗：去掉 data URL、图片块 JSON 残片、超长乱码尾巴。
+// 用于修复历史遗留的脏记忆，也用于兜底提取时的最终把关。
+function sanitizeMemoryText(raw) {
+    let s = String(raw == null ? '' : raw);
+    // 截图占位符与内部标记不属于记忆内容
+    s = s.replace(/\[\s*截图[^\]]*\]/g, ' ');
+    s = s.replace(/\[(?:MEMORY|SHORT_MEMORY|AGENT_MODE)[^\]]*\]/gi, ' ');
+    // 去掉 data URL（可能很长）
+    s = s.replace(/data:image\/[a-zA-Z]+;base64,[A-Za-z0-9+/=\s]+/g, '');
+    // 去掉图片块 / 任意 JSON 片段（含未闭合的尾巴）
+    s = s.replace(/\{\s*"type"\s*:\s*"[^"]*"[\s\S]*$/, '');
+    s = s.replace(/\{\s*"[\s\S]{0,400}$/, '');
+    // 去掉残留的键值碎片
+    s = s.replace(/"?image_url"?\s*:\s*\{?/gi, '').replace(/"url"\s*:\s*/gi, '');
+    s = s.replace(/[{}\[\]"]+/g, '');
+    s = s.replace(/\s+/g, ' ').trim();
+    return s;
+}
+
+// 从用户原话里确定性提取"显式记忆请求"，作为模型判"无"时的兜底。
+// 覆盖：记住/记一下/记下/帮我记/别忘了/不要忘记/保存下来 + 我叫/我是/我喜欢/我住在 等自述。
+const EXPLICIT_MEMORY_RE = /(记住|记一下|记下来|记下|帮我记|帮我存|别忘了|别忘记|不要忘|保存下来|remember|note\s+that)/i;
+const SELF_FACT_RE = /(我叫|我的名字是|我是|我住在|我来自|我的生日|我养了|我喜欢|我讨厌|我的工作是|我用的是)/;
+function extractExplicitMemoryRequests() {
+    const out = [];
+    const push = (s) => {
+        // 只做脏数据清洗（去 data URL / JSON 残片 / [截图] 占位符），人称交给模型在提示词约束下自己分清楚
+        let t = sanitizeMemoryText(s);
+        t = t.replace(/^[，。！？、：:;,.\-—\s]+/, '').replace(/[。！？\s]+$/, '');
+        if (t.length < 2) return;
+        if (t.length > 40) t = t.slice(0, 40);   // 记忆条目本就要求"不超过20~40字"
+        if (!out.some(x => x === t)) out.push(t);
+    };
+    chatHistory.forEach(msg => {
+        if (!msg || msg.role !== 'user') return;
+        const text = flattenMessageContent(msg.content);
+        if (!text) return;
+        if (!EXPLICIT_MEMORY_RE.test(text)) return;
+        // 去掉指令词本身，留下"要记的内容"
+        let rest = text.replace(new RegExp(EXPLICIT_MEMORY_RE.source, 'gi'), '')
+            .replace(/^(一下|这个|这件事|这条|：|:|，|,|\s)+/, '')
+            .replace(/^(数字|号码|内容|信息)\s*[:：]?\s*/i, '')
+            .trim();
+        if (rest.length >= 2) push(rest);
+        else push(text); // 指令词去掉后没剩东西（如"记住！（甩尾巴）"）则整句兜底
+    });
+    // 自述类事实（没写"记住"也算长期信息）
+    chatHistory.forEach(msg => {
+        if (!msg || msg.role !== 'user') return;
+        const text = flattenMessageContent(msg.content);
+        const clean = sanitizeMemoryText(text);
+        if (!clean || !SELF_FACT_RE.test(clean)) return;
+        if (clean.length <= 40) push(clean);
+    });
+    return out;
+}
+
+// 应用兜底（由模型改写，代码不做人称转换）：
+// 检测到"用户明确要求记住"的内容而总结又判了"无"时，**再让模型写一遍**——
+// 把用户的原始话术改写成第三人称记忆条目。人称转换始终由模型完成，代码只负责搬运。
+// 注意：绝不把用户原话直接写进记忆（那样会存成"我喜欢群青色"这种第一人称）。
+async function rewriteExplicitMemoriesViaModel(rawItems, requestOnce) {
+    const items = (rawItems || []).filter(Boolean);
+    if (!items.length) return 0;
+    const prompt =
+        '用户在这段对话里明确要求记住以下内容。请把它们改写成长期记忆条目：\n' +
+        items.map(t => '- ' + t).join('\n') +
+        '\n\n要求：每条不超过20字，每行一条；**主语一律用「用户」（第三人称）**，不要出现「我」「我的」「你」「我们」；' +
+        '只输出条目本身，不要任何标题、编号或标签。';
+    let text = '';
+    try {
+        text = await requestOnce(prompt);
+    } catch (e) {
+        console.warn('[float] 显式记忆改写请求失败，本次不写入（避免存入第一人称原话）:', e && e.message);
+        return 0;
+    }
+    if (!text) return 0;
+    let added = 0;
+    for (const rawLine of String(text).split('\n')) {
+        const line = String(rawLine || '').replace(/^\s*\d+[.、)]\s*/, '').trim();
+        if (!line || line === '无' || /^(none|无内容)$/i.test(line)) continue;
+        const clean = sanitizeMemoryText(line);
+        if (clean.length < 2) continue;
+        if (memoryItems.some(m => {
+            const t = String((m && (m.text || m.description)) || '').trim();
+            return t && (t === clean || t.includes(clean) || clean.includes(t));
+        })) continue;
+        await addMemoryItem(clean);
+        added++;
+    }
+    if (added > 0) console.warn('[float] 显式记忆已由模型改写并写入 ' + added + ' 条');
+    return added;
+}
+
+// 释放本次对话中未被保留（keepSet 之外）的截图：
+// 远程删除（DeepSeek 才有）+ 丢弃内存副本；瞬态截图从不落盘，所以无需清理磁盘
 async function cleanupNonMemoryImages(keepSet) {
+    const dropIds = [];
     for (const img of pendingConversationImages) {
         if (keepSet && keepSet.has(img.fileId)) continue;
-        try { if (window.electronAPI && window.electronAPI.deleteDeepSeekFile) await window.electronAPI.deleteDeepSeekFile(img.fileId); } catch (e) {}
-        try { if (window.electronAPI && window.electronAPI.deleteScreenshotCache && img.imagePath) await window.electronAPI.deleteScreenshotCache(img.imagePath); } catch (e) {}
+        dropIds.push(img.fileId);
+    }
+    if (!dropIds.length) return;
+    try {
+        if (window.electronAPI && window.electronAPI.releaseImages) {
+            await window.electronAPI.releaseImages(dropIds);
+        } else if (window.electronAPI && window.electronAPI.deleteDeepSeekFile) {
+            // 兼容旧主进程：至少删掉远程文件
+            for (const id of dropIds) { try { await window.electronAPI.deleteDeepSeekFile(id); } catch (e) {} }
+        }
+    } catch (e) {
+        console.warn('[float] 释放未入记忆的截图失败:', e && e.message);
+    }
+    // 旧版本可能给这些截图留过本地缓存文件，顺手清理（新版本不再产生）
+    for (const img of pendingConversationImages) {
+        if (keepSet && keepSet.has(img.fileId)) continue;
+        if (img.imagePath && window.electronAPI && window.electronAPI.deleteScreenshotCache) {
+            try { await window.electronAPI.deleteScreenshotCache(img.imagePath); } catch (e) {}
+        }
     }
 }
 
@@ -3560,28 +4887,38 @@ async function summarizeMemoryOnChatClose() {
     // 防止被 close 拦截路径与 beforeunload 后备路径同时触发而重复生成记忆
     if (memorySummarizeInFlight) return;
 
-    // 若未启用记忆，或没有对话，仍要清理本次上传的截图 file_id，避免在 Files API 上残留
-    if (!config.enableMemory || chatHistory.length === 0 || !config.apiKey) {
-        const skip = 'memory summary skipped enableMemory=' + config.enableMemory + ' history=' + chatHistory.length + ' hasKey=' + !!config.apiKey;
+    // 总结期间：隐藏关闭按钮 + 显示"记忆整理中"提示，避免用户在总结中途关窗丢记忆
+    showMemorySummaryOverlay();
+
+    const prov = config.multimodalProvider || 'deepseek';
+    // 凭据判定按"当前提供商"（此前写死 config.apiKey，导致 GLM/中转站/本地一律跳过总结 → 无法生成记忆）
+    const provCred = chatCredentials();
+    const memoryProviderOk = !!provCred.base && (prov === 'local' || !!provCred.key);
+    if (!config.enableMemory || chatHistory.length === 0 || !memoryProviderOk) {
+        const skip = 'memory summary skipped enableMemory=' + config.enableMemory + ' history=' + chatHistory.length + ' provider=' + prov + ' hasUrl=' + !!provCred.base + ' hasKey=' + !!provCred.key;
         console.warn('[float]', skip);
         if (window.electronAPI && window.electronAPI.logToMain) window.electronAPI.logToMain('warn', '[float:summary] ' + skip);
         if (pendingConversationImages.length > 0) {
             await cleanupNonMemoryImages(new Set());
             pendingConversationImages = [];
         }
+        hideMemorySummaryOverlay();
         return;
     }
 
     memorySummarizeInFlight = true;
+    // 统一请求变量放在 try 之外：catch 里也要能安全引用（此前 const 在 try 内，
+    // catch 引用 gUrl 会再抛 ReferenceError，导致错误处理本身崩掉）
+    const cred = chatCredentials();
+    const gUrl = cred.base;
+    const gKey = cred.key;
+    // 渲染进程 console 默认不可见，总结日志统一走主进程打印（renderer-log -> 主进程终端）
+    const logMain = (level, msg) => {
+        try { if (window.electronAPI && window.electronAPI.logToMain) window.electronAPI.logToMain(level, msg); } catch (e) {}
+    };
+    // 显式记忆是否已由模型改写处理过（避免 try / finally 重复请求）
+    let explicitMemoriesHandled = false;
     try {
-        // 统一请求变量放在 try 顶部，catch 中也能安全引用
-        const cred = chatCredentials();
-        const gUrl = cred.base;
-        const gKey = cred.key;
-        // 渲染进程 console 默认不可见，总结日志统一走主进程打印（renderer-log -> 主进程终端）
-        const logMain = (level, msg) => {
-            try { if (window.electronAPI && window.electronAPI.logToMain) window.electronAPI.logToMain(level, msg); } catch (e) {}
-        };
 
         // 已保存的记忆（长期），提示AI不要重复
         const existingMemoriesText = memoryItems.length > 0
@@ -3605,94 +4942,150 @@ async function summarizeMemoryOnChatClose() {
             if (Array.isArray(c)) return c.some(b => b && b.type === 'text' && FORCE_MEMORY_RE.test(b.text || ''));
             return false;
         });
-        const blocks = [];
-        const imageSequence = []; // 顺序与 blocks 中文件块一一对应（存 file_id）
-        // 预扫描：按出现顺序收集所有截图 file_id，供"强制图像记忆"指令引用最后一张
-        chatHistory.forEach(msg => {
-            const c = msg.content;
-            if (Array.isArray(c)) {
-                c.filter(b => b && b.type === 'file' && b.file_id).forEach(fb => imageSequence.push(fb.file_id));
-            }
-        });
-        // 用户回复含 "forcememory" 且本次对话有截图：注入强制指令，
-        // 总结动作仍由 AI 完成，指令直接给出确切编号，要求 AI 必须输出 KEEP:<编号>|test
-        const forceText = hasForceMemory && imageSequence.length > 0
-            ? '【强制指令】用户要求强制执行图像记忆：本次总结必须将最后一张截图【第' + imageSequence.length + '张截图】输出为 KEEP:' + imageSequence.length + '|test（描述固定为 test，不含引号），不得遗漏、不得更改编号与描述。\n'
-            : '';
-        blocks.push({
-            type: 'text',
-            text: '以下是本次对话的完整内容，按发生顺序由 文本 和 屏幕截图 混合组成，每张截图前都有"【第N张截图】"标记（N 从 1 开始）。\n' +
-                '请把整段对话（文本 + 截图）当作一个整体来理解：每张截图都出现于具体的对话上下文中，是对话的一部分（例如用户展示的成果、需要记住的画面、你分析过的内容），不要把它当作孤立图片，要结合前后文理解它在对话中的角色。\n' +
-                '请统一提取整个对话中真正值得长期记忆的信息（文本条目与 KEEP 截图条目，都属于同一份记忆）：\n' +
-                '- 文本条目：只记录用户偏好、重要事实、约定、重大事件，每行一条，不超过20字，没有则输出"无"。\n' +
-                '- KEEP 截图条目：判定哪几张截图值得作为长期图像记忆保留（重要画面、关键结果、有价值的信息），只输出需保留项，每行格式 KEEP:<截图编号>|<简短描述>，编号用"【第N张截图】"里的数字（如 KEEP:1|用户的项目预算图），描述需体现该图在对话中的角色，限20字内，无需保留则输出"无"。\n' +
-                (forceText ? forceText : '') +
-                '先输出文本条目，再输出 KEEP 截图条目。'
-        });
-        let imgIdx = 0; // 已写入的截图编号（与 imageSequence 一一对应）
+        // ===== 改用「真实角色消息」重建对话 =====
+        // 以前把所有轮次压成一条 user 消息、只用"用户：/桌宠："文本前缀区分——
+        // 模型很容易忽略前缀、把用户第一人称原话当自己的话（"我喜欢群青色"就是这么来的）。
+        // 现在按 OpenAI 规范拆成 role: 'user' / 'assistant' 逐条发送，人称由协议本身区分。
+        const memMessages = [];
+        const imageSequence = []; // 顺序与【第N张截图】编号一一对应（DeepSeek=file_id，其它=内部 id）
+        const isLocalProv = prov === 'local';
+        let imgIdx = 0;
+
+        // 角色消息：system 规则（含人称约束）随后单独放
+        const redactText = (t) => hasForceMemory ? String(t || '').replace(FORCE_MEMORY_RE_G, '') : String(t || '');
+        const matchPendingByUrl = (url) => pendingConversationImages.find(im => im && im.dataUrl && im.dataUrl === url);
+
         for (const msg of chatHistory) {
-            const roleName = msg.role === 'user' ? '用户' : '桌宠';
+            const isUser = msg.role === 'user';
+            const turnRole = isUser ? 'user' : 'assistant';
             const c = msg.content;
-            const redact = (t) => hasForceMemory ? (t || '').replace(FORCE_MEMORY_RE_G, '') : (t || '');
             if (typeof c === 'string') {
-                blocks.push({ type: 'text', text: `${roleName}：${redact(c)}` });
-            } else if (Array.isArray(c)) {
-                const textBlocks = c.filter(b => b && b.type === 'text' && b.text);
-                const fileBlocks = c.filter(b => b && b.type === 'file' && b.file_id);
-                const turnText = textBlocks.map(b => b.text).join('\n') || (fileBlocks.length ? '[截图]' : '');
-                blocks.push({ type: 'text', text: `${roleName}：${redact(turnText)}` });
-                // 该消息的图片按原顺序紧跟其文本块，实现"文本-图片"混合输入；
-                // 每张图片前加一个文字编号标记，模型据此引用（KEEP:<编号>）
-                for (const fb of fileBlocks) {
+                memMessages.push({ role: turnRole, content: redactText(c) });
+                continue;
+            }
+            if (!Array.isArray(c)) continue;
+
+            const content = [];
+            const turnText = c.filter(b => b && b.type === 'text' && b.text).map(b => b.text).join('\n');
+            if (turnText.trim()) content.push({ type: 'text', text: redactText(turnText) });
+
+            if (!isLocalProv) {
+                // ① DeepSeek Files API 的 file 块
+                for (const fb of c.filter(b => b && b.type === 'file' && b.file_id)) {
                     imgIdx++;
-                    blocks.push({ type: 'text', text: `【第${imgIdx}张截图】` });
-                    blocks.push({ type: 'file', file_id: fb.file_id });
+                    content.push({ type: 'text', text: `【第${imgIdx}张截图】` });
+                    content.push({ type: 'file', file_id: fb.file_id });
+                    imageSequence.push(fb.file_id);
+                }
+                // ② GLM / 中转站的 image_url 块（data URL）：原样带上，并回填其内部 id 供 KEEP 引用
+                for (const ib of c.filter(b => b && b.type === 'image_url' && b.image_url && b.image_url.url)) {
+                    imgIdx++;
+                    content.push({ type: 'text', text: `【第${imgIdx}张截图】` });
+                    content.push({ type: 'image_url', image_url: ib.image_url });
+                    const pend = matchPendingByUrl(ib.image_url.url);
+                    imageSequence.push(pend ? pend.fileId : ('inline-' + imgIdx));
                 }
             }
+            memMessages.push({ role: turnRole, content: content.length ? content : (turnText || '[截图]') });
         }
-        logMain('info', '[float:summary] start model=deepseek-v4-flash-vision-exp images=' + pendingConversationImages.length + ' blocks=' + blocks.length + ' forceMemory=' + hasForceMemory + ' lastIdx=' + imageSequence.length + ' provider=' + (config.multimodalProvider || 'deepseek') + ' url=' + gUrl);
 
-        const response = await fetch(gUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${gKey}`
-            },
-            body: JSON.stringify({
-                model: 'deepseek-v4-flash-vision-exp',
+        // ③ 未被任何消息引用的截图（异常/边缘情况）单独补一条 user 消息，避免"拍了却看不到"
+        if (!isLocalProv) {
+            const attached = new Set(imageSequence);
+            const orphans = pendingConversationImages.filter(im => im && !attached.has(im.fileId));
+            if (orphans.length) {
+                const content = [{ type: 'text', text: '以下是本次对话中出现过的屏幕截图（按时间先后编号）：' }];
+                for (const im of orphans) {
+                    const useFile = im.remote !== false && im.fileId;
+                    const useUrl = !useFile && im.dataUrl;
+                    if (!useFile && !useUrl) continue;
+                    imgIdx++;
+                    content.push({ type: 'text', text: `【第${imgIdx}张截图】` });
+                    if (useFile) content.push({ type: 'file', file_id: im.fileId });
+                    else content.push({ type: 'image_url', image_url: { url: im.dataUrl } });
+                    imageSequence.push(im.fileId);
+                }
+                if (content.length > 1) memMessages.push({ role: 'user', content });
+            }
+        }
+
+        // ④ 末尾追加"任务指令"（单独一条 user 消息，不混进对话内容）
+        const forceText = hasForceMemory && imageSequence.length > 0 && !isLocalProv
+            ? '【强制指令】用户要求强制执行图像记忆：必须将最后一张截图【第' + imageSequence.length + '张截图】输出为 KEEP:' + imageSequence.length + '|test（描述固定为 test），不得遗漏、不得更改编号与描述。\n'
+            : '';
+        const taskText = (isLocalProv
+            ? '请从上面的对话中提取值得长期记忆的信息。每行一条，不超过20字；没有可记忆内容时只输出"无"。'
+            : '请从上面的对话与截图中提取值得长期记忆的信息（文本条目 + KEEP 截图条目）。\n' +
+              '- 文本条目：每行一条，不超过20字，没有则输出"无"。\n' +
+              '- KEEP 截图条目：值得长期保留的截图输出 KEEP:<编号>|<简短描述>，编号用"【第N张截图】"里的数字（如 KEEP:1|用户的项目预算图），描述体现该图在对话中的角色，限20字内；无需保留则输出"无"。\n' +
+              (forceText ? forceText : '')) +
+            '直接输出条目本身，不要输出任何标题或标签（例如不要写"文本记忆："）。';
+        memMessages.push({ role: 'user', content: taskText });
+
+        logMain('info', '[float:summary] start model=' + providerModelName('memory') + ' images=' + pendingConversationImages.length + ' msgs=' + memMessages.length + ' forceMemory=' + hasForceMemory + ' lastIdx=' + imageSequence.length + ' provider=' + prov + ' url=' + gUrl);
+
+        // 记忆总结同样走候选链：繁忙重试，仍失败则换备选模型。
+        // 关键：思考型模型（glm-4.6v-flash / glm-5.x）不关思考会把正文挤空 → summary 变成"无"，
+        // 所以这里按模型能力显式关掉思考，保证拿到正文。
+        const memModel = providerModelName('memory');
+        const memThinking = thinkingParamsFor(prov, memModel, false);
+        logMain('info', '[float:summary] thinking params=' + JSON.stringify(memThinking) + ' model=' + memModel);
+        const sumRes = await requireAIF().runChain({
+            chain: requireAIF().buildChain(config, 'memory'),
+            policy: requireAIF().retryPolicy(config),
+            attempt: (candidate) => attemptChatCompletion(candidate, Object.assign({
+                model: providerModelName('memory'),
                 messages: [
                     {
                         role: 'system',
-                        content: `你是一个记忆助手。请把对话文本与其间的屏幕截图当作一个整体来理解：截图不是孤立图片，而是所处对话上下文的组成部分（例如用户展示的画面、要记住的信息、你分析过的对象），提取记忆时要结合上下文判断每张截图的意义。\n\n重要规则：\n1. 只记录用户的偏好、重要事实、约定、重大事件等真正有长期价值的信息。\n2. 不要总结"桌宠做了什么"、"今天聊了什么"等日常琐事，除非涉及非常重大的事件。\n3. 没有值得长期记忆的内容就输出"无"。\n4. 文本记忆每行一条，每条不超过20字。\n5. 截图值得保留时输出 KEEP:<截图编号>|<简短描述>，编号是"【第N张截图】"里的阿拉伯数字（N从1开始），描述需体现该图在对话中的角色，限20字内。\n6. 严格检查已保存的记忆，不要重复保存相同或高度相似的内容。\n7. 先输出文本记忆，再输出 KEEP 行。${existingMemoriesText}`
+                        content: isLocalProv
+                            ? `你是记忆助手。你会收到一段真实的对话记录（user = 用户说的话，assistant = 桌宠说的话），请从中提取值得长期记忆的信息。\n\n重要规则：\n0. **用户明确要求记住的内容必须记录**（"记住这个数字""帮我记一下""别忘了""我叫…"），一律不得判为"无"。\n1. 只记录用户的偏好、重要事实、约定、重大事件等真正有长期价值的信息。\n2. 不要总结"桌宠做了什么"、"今天聊了什么"等日常琐事，除非涉及非常重大的事件。\n3. 没有值得长期记忆的内容就输出"无"。\n4. 每条不超过20字，每行一条。\n5. **分清楚人称**：user 说的话才是"用户"的事实，assistant 说的话是桌宠自己的话，不要把桌宠说的话记成用户的事。记忆主语一律写「用户」（第三人称），涉及桌宠自身写「桌宠」，不要用「我」「我的」「你」「我们」。例如 user 说"我喜欢群青色"，要记成"用户喜欢群青色"。\n6. 严格检查已保存的记忆，不要重复保存相同或高度相似的内容。\n7. 直接输出条目本身，每行一条，不要输出任何标题或标签（例如不要写"文本记忆："）。${existingMemoriesText}`
+                            : `你是记忆助手。你会收到一段真实的对话记录：role=user 是用户说的话，role=assistant 是桌宠说的话；部分消息里还带有屏幕截图（标有【第N张截图】）。请把文字与截图当作同一段对话来理解。\n\n重要规则：\n0. **用户明确要求记住的内容必须记录**（例如"记住这个数字""帮我记一下""别忘了""我叫…""我喜欢…"），一律不得判为"无"。\n1. 只记录用户的偏好、重要事实、约定、重大事件等真正有长期价值的信息。\n2. 不要总结"桌宠做了什么"、"今天聊了什么"等日常琐事，除非涉及非常重大的事件。\n3. 没有值得长期记忆的内容就输出"无"。\n4. 文本记忆每行一条，每条不超过20字。\n5. **分清楚人称**：user 说的话才是"用户"的事实，assistant 说的话是桌宠自己的话，不要把桌宠说的话记成用户的事。记忆主语一律写「用户」（第三人称），涉及桌宠自身写「桌宠」，不要用「我」「我的」「你」「我们」。例如 user 说"我喜欢群青色"，要记成"用户喜欢群青色"；user 说"你叫什么"，要记成"用户问过桌宠的名字"。\n6. 截图值得保留时输出 KEEP:<截图编号>|<简短描述>，编号是"【第N张截图】"里的阿拉伯数字（N从1开始），描述需体现该图在对话中的角色，限20字内。\n7. 严格检查已保存的记忆，不要重复保存相同或高度相似的内容。\n8. 直接输出条目本身，每行一条，不要输出任何标题或标签（例如不要写"文本记忆："）。${existingMemoriesText}`
                     },
-                    {
-                        role: 'user',
-                        content: blocks
-                    }
+                    ...memMessages
                 ],
                 max_tokens: 1024,
                 temperature: 0.3
-            })
+            }, memThinking))
         });
-
-        const data = await response.json();
-        if (!response.ok) {
-            const errDetail = 'vision summary request failed status=' + response.status + ' body=' + JSON.stringify(data).substring(0, 300) + ' url=' + gUrl;
+        if (!sumRes.ok) {
+            const errDetail = 'summary request failed: ' + sumRes.error + ' url=' + gUrl;
             console.warn('[float]', errDetail);
             logMain('warn', '[float:summary] ' + errDetail);
-            throw new Error('summary vision request ' + response.status);
+            throw new Error('summary request failed: ' + sumRes.error);
         }
-        const summary = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) ? data.choices[0].message.content.trim() : '无';
+        const data = sumRes.data || { choices: [{ message: { content: sumRes.content } }] };
+        const sumMsg = (data.choices && data.choices[0] && data.choices[0].message) || {};
+        // 正文为空但模型把内容写进了 reasoning_content（思考型模型）时，退而用推理文本解析，
+        // 避免"明明有内容却记成无"。
+        let summary = '';
+        if (sumMsg.content && String(sumMsg.content).trim()) summary = String(sumMsg.content).trim();
+        else if (sumMsg.reasoning_content && String(sumMsg.reasoning_content).trim()) {
+            summary = String(sumMsg.reasoning_content).trim();
+            logMain('warn', '[float:summary] 正文为空，改用 reasoning_content 解析（建议改用非思考模型做记忆总结）');
+        } else {
+            summary = '无';
+        }
+        if (sumRes.usedFallback) logMain('warn', '[float:summary] 使用备选模型完成：' + (sumRes.candidate ? sumRes.candidate.provider + '/' + sumRes.candidate.model : ''));
         console.warn('[float] summary vision response:', JSON.stringify(summary).substring(0, 500));
         logMain('info', '[float:summary] vision response textLen=' + summary.length + ' preview=' + JSON.stringify(summary).substring(0, 300));
 
         // ===== 解析：文本记忆（非 KEEP 行）+ 图像记忆（KEEP 行）=====
+        // 模型常自作主张输出「文本记忆：无」「文本记忆：」这类标题行，必须过滤掉，
+        // 否则会写入一条毫无意义的记忆。
+        const MEMORY_LABEL_RE = /^(文本记忆|记忆|文本条目|条目|摘要|总结)\s*[:：]?\s*(无|none|无内容)?\s*$/i;
         let textMemories = 0;
         for (const rawLine of summary.split('\n')) {
             const line = rawLine.trim();
             if (!line || /^KEEP:/i.test(line)) continue;
-            const clean = line.replace(/^\d+\.\s*/, '').trim();
-            if (clean.length > 1 && clean !== '无') {
+            const clean = line
+                .replace(/^\d+[.、)]\s*/, '')
+                .replace(/^(文本记忆|记忆|文本条目|条目)\s*[:：]\s*/, '')
+                .trim();
+            // 过滤空行、纯"无"、以及只剩标签的无效行
+            if (!clean || clean === '无' || /^(none|无内容|没有)$/i.test(clean)) continue;
+            if (MEMORY_LABEL_RE.test(line)) continue;
+            if (clean.length > 1) {
                 await addMemoryItem(clean);
                 textMemories++;
             }
@@ -3702,7 +5095,10 @@ async function summarizeMemoryOnChatClose() {
         // 按引用解析图片：优先支持数字编号（KEEP:1|…，对应【第N张截图】），
         // 也兼容直接填 file_id 的旧格式；顺带清理模型可能误输出的完整 URL/多余空白。
         const resolveImageRef = (ref) => {
-            let r = ref.trim().replace(/^.*\/files\//, '');
+            const raw = String(ref == null ? '' : ref).trim();
+            // KEEP:无 / KEEP:none 这类"没有要保留的截图"是正常输出，直接忽略，不打警告
+            if (!raw || /^(无|none|null|-|没有|无截图)$/i.test(raw)) return null;
+            let r = raw.replace(/^.*\/files\//, '');
             if (/^\d+$/.test(r)) {
                 const idx = parseInt(r, 10) - 1;
                 if (idx >= 0 && idx < imageSequence.length) {
@@ -3722,21 +5118,58 @@ async function summarizeMemoryOnChatClose() {
             const desc = (m[2] || '').trim();
             if (info) {
                 keepSet.add(info.fileId);
+                // 判定为"进入记忆"：此时才把截图从内存落盘（瞬态截图此前不落盘）
+                let persisted = { imagePath: info.imagePath || '', imageUrl: info.imageUrl || '' };
+                try {
+                    if (window.electronAPI && window.electronAPI.keepMemoryImage) {
+                        const kept = await window.electronAPI.keepMemoryImage(info.fileId);
+                        if (kept && kept.success) persisted = { imagePath: kept.imagePath, imageUrl: kept.imageUrl };
+                        else logMain('warn', '[float:summary] 图像记忆落盘失败 ref=' + m[1] + ' msg=' + (kept && kept.message));
+                    }
+                } catch (e) {
+                    logMain('warn', '[float:summary] 图像记忆落盘异常 ref=' + m[1] + ' err=' + (e && e.message));
+                }
                 addedImageMemories.push({
                     type: 'image',
                     fileId: info.fileId,
-                    imagePath: info.imagePath,
-                    imageUrl: info.imageUrl,
+                    imagePath: persisted.imagePath,
+                    imageUrl: persisted.imageUrl,
                     description: desc || '（截图记忆）',
                     time: info.time || Date.now()
                 });
-            } else {
+            } else if (!/^(无|none|null|-|没有|无截图)$/i.test(String(m[1] || '').trim())) {
                 logMain('warn', '[float:summary] KEEP references unknown ref=' + m[1]);
             }
         }
         if (addedImageMemories.length > 0) {
             memoryItems.push(...addedImageMemories);
-            if (window.electronAPI && window.electronAPI.memorySave) {
+        }
+        // ===== 兜底：模型判"无"但用户明确要求记住 → 让模型再写一遍（不做代码人称转换）=====
+        if (textMemories === 0) {
+            const rawItems = extractExplicitMemoryRequests();
+            if (rawItems.length) {
+                const added = await rewriteExplicitMemoriesViaModel(rawItems, (prompt) => requestChatCompletion({
+                    mode: 'memory',
+                    body: Object.assign({
+                        model: providerModelName('memory'),
+                        messages: [
+                            { role: 'system', content: '你是记忆助手。把用户明确要求记住的内容改写成长期记忆条目，主语一律用「用户」（第三人称），不要出现「我」「我的」「你」「我们」，每条不超过20字，每行一条，不要任何标题或标签。' },
+                            { role: 'user', content: prompt }
+                        ],
+                        max_tokens: 200,
+                        temperature: 0.3
+                    }, memThinking)
+                }).then(d => (d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || ''));
+                textMemories += added;
+                explicitMemoriesHandled = true;
+            }
+        }
+
+        // 新增的图像记忆用 append-only 写入（多窗口共用一份文件，整份覆盖会互相冲掉）
+        if (addedImageMemories.length > 0) {
+            if (window.electronAPI && window.electronAPI.memoryAppend) {
+                await window.electronAPI.memoryAppend(addedImageMemories);
+            } else if (window.electronAPI && window.electronAPI.memorySave) {
                 await window.electronAPI.memorySave(memoryItems);
             }
         }
@@ -3751,6 +5184,35 @@ async function summarizeMemoryOnChatClose() {
         console.warn('[float]', failDetail, error);
         if (window.electronAPI && window.electronAPI.logToMain) window.electronAPI.logToMain('error', '[float:summary] ' + failDetail);
     } finally {
+        // 总结整段失败时再兜一次：同样让模型改写，绝不把用户第一人称原话直接写进记忆
+        if (!explicitMemoriesHandled) {
+            try {
+                const rawItems = extractExplicitMemoryRequests();
+                if (rawItems.length) {
+                    await rewriteExplicitMemoriesViaModel(rawItems, (prompt) => requestChatCompletion({
+                        mode: 'memory',
+                        body: Object.assign({
+                            model: providerModelName('memory'),
+                            messages: [
+                                { role: 'system', content: '你是记忆助手。把用户明确要求记住的内容改写成长期记忆条目，主语一律用「用户」（第三人称），不要出现「我」「我的」「你」「我们」，每条不超过20字，每行一条，不要任何标题或标签。' },
+                                { role: 'user', content: prompt }
+                            ],
+                            max_tokens: 200,
+                            temperature: 0.3
+                        }, memThinking)
+                    }).then(d => (d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || ''));
+                }
+            } catch (e) {
+                console.warn('[float] 显式记忆改写兜底失败:', e && e.message);
+            }
+        }
+        // 总结失败时 pendingConversationImages 不会被清空，这里确保
+        // "未进入记忆的截图"一律被释放（远程删除 + 丢弃内存副本），不留残留
+        if (pendingConversationImages.length > 0) {
+            try { await cleanupNonMemoryImages(new Set()); } catch (e) {}
+            pendingConversationImages = [];
+        }
+        hideMemorySummaryOverlay();
         memorySummarizeInFlight = false;
     }
 }
@@ -3762,23 +5224,27 @@ let chatMemorySummarizedOnClose = false;
 
 // 对话开始时，AI根据自身状态决定心情（用于立绘）
 async function decideMoodByState() {
-    if (!config.apiKey) {
+    const prov = config.multimodalProvider || 'deepseek';
+    const cred = chatCredentials();
+    // 本地 LLM 只需地址；云端需要 Key
+    if (!cred.base || (prov !== 'local' && !cred.key)) {
         switchIllust(null);
         return;
     }
+    const model = providerModelName();
     try {
         const statsStr = Object.entries(stats)
             .map(([k, v]) => `${statNames[k]}: ${Math.round(v)}%`)
             .join(', ');
 
-        const response = await fetch(config.apiUrl, {
+        const response = await fetch(cred.base, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${config.apiKey}`
+                ...(cred.key ? { 'Authorization': `Bearer ${cred.key}` } : {})
             },
             body: JSON.stringify({
-                model: 'deepseek-v4-flash',
+                ...(model ? { model: model } : {}),
                 messages: [
                     {
                         role: 'system',
@@ -3896,7 +5362,7 @@ function addRetryBubble(text) {
     msg.appendChild(textDiv);
     const btn = document.createElement('button');
     btn.textContent = '🔄 重试';
-    btn.style.cssText = 'margin-top:8px;padding:4px 14px;border:1px solid #4f7cff;border-radius:999px;background:#eaf0ff;color:#4f7cff;cursor:pointer;font-size:12px;';
+    btn.style.cssText = 'margin-top:8px;padding:4px 14px;border:1px solid var(--brand);border-radius:999px;background:var(--brand-soft-strong);color:var(--brand);cursor:pointer;font-size:12px;';
     btn.addEventListener('click', async () => {
         const fn = retryChatRequestFn;
         retryChatRequestFn = null;
@@ -4066,14 +5532,6 @@ const agentTools = [
     {
         type: 'function',
         function: {
-            name: 'get_time',
-            description: '获取当前时间',
-            parameters: { type: 'object', properties: {} }
-        }
-    },
-    {
-        type: 'function',
-        function: {
             name: 'volume',
             description: '音量控制：set 设置 0-100，get 获取当前音量',
             parameters: {
@@ -4084,14 +5542,6 @@ const agentTools = [
                 },
                 required: ['action']
             }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'screenshot',
-            description: '截屏保存到桌面',
-            parameters: { type: 'object', properties: {} }
         }
     },
     {
@@ -4119,28 +5569,6 @@ const agentTools = [
                     params: { type: 'object' }
                 },
                 required: ['action']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'capture_screen',
-            description: '捕获当前屏幕截图并返回一段简短描述，帮助理解用户当前环境。',
-            parameters: { type: 'object', properties: {}, required: [] }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'vision',
-            description: '图像识别：截取当前屏幕，用 DeepSeek 视觉模型（deepseek-v4-flash-vision-exp）分析并回答 question。适用于读取截图文字、识别图表、判断界面状态。',
-            parameters: {
-                type: 'object',
-                properties: {
-                    question: { type: 'string', description: '针对屏幕图像想了解的完整问题' }
-                },
-                required: ['question']
             }
         }
     },
@@ -4285,67 +5713,6 @@ async function executeToolHandler(toolName, args, timeout = 15000) {
 // ===== 轻量模式处理器（文本标记，失败即停，结果折叠显示） =====
 
 // 弱匹配：在成本模式下，AI 可能不输出严格 <TOOL:...> 格式，尝试备选模式
-function weakMatchToolCalls(text) {
-    const toolNames = ['screenshot', 'capture_screen', 'generate_image', 'open_app', 'open_url', 'get_weather', 'get_time', 'volume', 'get_system_info', 'program'];
-    const calls = [];
-    // 模式0: <TOOL:toolName key="value">（标准格式，但 Agent 模式不走 handleLightMode，需在此兜底）
-    const angleRegex = /<TOOL:(\w+)\s+([^>]+)>/gi;
-    let m0;
-    while ((m0 = angleRegex.exec(text)) !== null) {
-        const toolName = m0[1];
-        const args = {};
-        const argRegex = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
-        let a;
-        while ((a = argRegex.exec(m0[2])) !== null) {
-            args[a[1]] = a[2] !== undefined ? a[2] : a[3];
-        }
-        calls.push({ fullMatch: m0[0], toolName, args });
-    }
-    // 模式1: (TOOL:toolName key="value") 或 (TOOL:toolName key='value')
-    const parenRegex = /\(TOOL:(\w+)\s+([^)]+)\)/gi;
-    let m;
-    while ((m = parenRegex.exec(text)) !== null) {
-        const toolName = m[1];
-        const args = {};
-        const argRegex = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
-        let a;
-        while ((a = argRegex.exec(m[2])) !== null) {
-            args[a[1]] = a[2] !== undefined ? a[2] : a[3];
-        }
-        calls.push({ fullMatch: m[0], toolName, args });
-    }
-    // 模式2: toolName key="value" 或 key='value'（无TOOL包裹，避免重复匹配已匹配到的）
-    for (const name of toolNames) {
-        // 跳过已通过 (TOOL:...) 匹配到的工具名
-        const alreadyMatched = calls.some(c => c.toolName === name);
-        if (alreadyMatched) continue;
-        const regex = new RegExp(`\\b${name}\\s+((?:\\w+\\s*=\\s*(?:"[^"]*"|'[^']*')\\s*)+)`, 'gi');
-        let m2;
-        while ((m2 = regex.exec(text)) !== null) {
-            const args = {};
-            const argRegex = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
-            let a;
-            while ((a = argRegex.exec(m2[1])) !== null) {
-                args[a[1]] = a[2] !== undefined ? a[2] : a[3];
-            }
-            calls.push({ fullMatch: m2[0], toolName: name, args });
-        }
-    }
-    // 模式3: 单独的工具名（无参数，用于 screenshot 等无参工具）
-    for (const name of ['screenshot', 'capture_screen', 'get_time', 'get_system_info']) {
-        const alreadyMatched = calls.some(c => c.toolName === name);
-        if (alreadyMatched) continue;
-        const regex = new RegExp(`\\b${name}\\b`, 'gi');
-        let m3;
-        while ((m3 = regex.exec(text)) !== null) {
-            const already = calls.some(c => c.toolName === name && c.fullMatch === m3[0]);
-            if (!already) {
-                calls.push({ fullMatch: m3[0], toolName: name, args: {} });
-            }
-        }
-    }
-    return calls;
-}
 
 // 去除内部标记（与 addChatMessage 的显示清理一致，但保留换行，供流式/富文本渲染）
 function stripChatMarkers(text) {
@@ -4356,39 +5723,55 @@ function stripChatMarkers(text) {
     s = s.replace(/<CMD:[^>]+>/g, '');
     s = s.replace(/<EFFECT:[^>]+>/g, '');
     s = s.replace(/<STATE:[^>]+>/g, '');
+    s = s.replace(/<TOOL:[^>]*>/g, '');        // 旧文本工具协议（已废弃，仅清理历史遗留）
+    s = s.replace(/\[AGENT_MODE\]/g, '');       // 旧 agent 标记（已废弃）
+    s = s.replace(/<\/?think(?:ing)?>/gi, '');  // 思考标签（内容由 extractThink 负责分离）
     s = s.replace(/[\u200B-\u200F\uFEFF\u00AD\u2060\u180E\uFE00-\uFE0F\u2000-\u200A\u202F\u205F\u3000]+/g, ' ');
     s = s.replace(/[\uFE0E\uFE0F]/g, '');
     return s.trim();
 }
 
-// ===== 统一 AI 请求：传 onDelta 时走 SSE 流式（实时回调完整累积文本），否则一次性 JSON =====
-async function requestChatCompletion({ apiUrl, apiKey, body, onDelta }) {
+// ===== 单次调用（对某个候选模型发一次请求）=====
+// 传 onDelta 时走 SSE 流式（实时回调完整累积文本），否则一次性 JSON。
+// 返回值带 retryable / fatal / partial，供 ai-fallback.js 决定「重试还是换备选」。
+async function attemptChatCompletion(candidate, body, onDelta) {
+    const apiUrl = candidate.apiUrl;
+    const apiKey = candidate.apiKey;
     const headers = {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
+        ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
     };
     const isStream = typeof onDelta === 'function';
+    // 候选模型覆盖请求体里的 model（本地/中转站未选模型时保持原样）
+    const payload = Object.assign({}, body);
+    if (candidate.model) payload.model = candidate.model;
+    // 发送前规范化：补齐 role、按 provider 规则决定是否回传 reasoning_content
+    const hasTools = Array.isArray(body && body.tools) && body.tools.length > 0;
+    payload.messages = sanitizeChatMessages(body && body.messages, requireAIF().shouldEchoReasoning(candidate.provider, hasTools));
+    let emitted = false; // 是否已经向界面吐出过内容（决定还能不能重试）
     const r = await fetch(apiUrl, {
         method: 'POST',
         headers,
-        body: JSON.stringify(isStream ? Object.assign({}, body, { stream: true }) : body)
+        body: JSON.stringify(isStream ? Object.assign({}, payload, { stream: true }) : payload)
     });
     if (!r.ok) {
         const text = await r.text();
-        const detail = 'chat API error status=' + r.status + ' body=' + text.substring(0, 500) + ' model=' + (body.model || '?') + ' stream=' + isStream;
+        const detail = 'chat API error status=' + r.status + ' body=' + text.substring(0, 500) + ' model=' + (payload.model || '?') + ' stream=' + isStream;
         console.error('[float]', detail);
         if (window.electronAPI && window.electronAPI.logToMain) window.electronAPI.logToMain('error', '[float:chat] ' + detail);
-        throw new Error('API ' + r.status + ': ' + text.substring(0, 300));
+        let message = text.substring(0, 300);
+        try { const j = JSON.parse(text); message = (j && j.error && (j.error.message || j.error.code)) || j.message || message; } catch (e) {}
+        return { ok: false, status: r.status, message: 'API ' + r.status + ': ' + message, partial: false };
     }
     if (!isStream) {
         const text = await r.text();
         let parsed;
         try { parsed = JSON.parse(text); }
-        catch (e) { console.error('[float] chat API non-JSON body:', text.substring(0, 300)); throw new Error('non-JSON response: ' + text.substring(0, 200)); }
-        return parsed;
+        catch (e) { console.error('[float] chat API non-JSON body:', text.substring(0, 300)); return { ok: false, status: r.status, message: 'non-JSON response: ' + text.substring(0, 200) }; }
+        return { ok: true, data: parsed, content: '', status: r.status, message: '' };
     }
     // ----- SSE 流式解析 -----
-    if (!r.body) throw new Error('stream body not supported');
+    if (!r.body) return { ok: false, status: r.status, message: 'stream body not supported' };
     const reader = r.body.getReader();
     const decoder = new TextDecoder('utf-8');
     let buffer = '';
@@ -4404,6 +5787,7 @@ async function requestChatCompletion({ apiUrl, apiKey, body, onDelta }) {
         if (delta.reasoning_content) result.reasoning_content += delta.reasoning_content;
         if (delta.content) {
             result.content += delta.content;
+            emitted = true;
             onDelta(result.content);
         }
         if (delta.tool_calls) {
@@ -4445,429 +5829,329 @@ async function requestChatCompletion({ apiUrl, apiKey, body, onDelta }) {
             if (dataStr.trim()) handleChunk(dataStr.trim());
         }
     };
-    for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+    try {
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+            feedBuffer();
+        }
+        buffer += decoder.decode();
         feedBuffer();
+        if (buffer.trim()) handleChunk(buffer.trim());
+    } catch (e) {
+        // 流中途断开：已吐出内容则不允许换模型重来（partial），否则按可重试错误处理
+        console.warn('[float] SSE 流中断:', e && e.message);
+        return { ok: false, status: 0, message: '流式响应中断：' + ((e && e.message) || e), partial: emitted, content: result.content };
     }
-    buffer += decoder.decode();
-    feedBuffer();
-    if (buffer.trim()) handleChunk(buffer.trim());
+    if (!result.content && !result.tool_calls) {
+        return { ok: false, status: r.status, message: '流式响应为空', partial: false };
+    }
     return {
-        choices: [{
-            message: {
-                content: result.content,
-                reasoning_content: result.reasoning_content || null,
-                tool_calls: result.tool_calls
-            },
-            finish_reason: result.finish_reason
-        }]
+        ok: true,
+        content: result.content,
+        status: r.status,
+        message: '',
+        data: {
+            choices: [{
+                message: {
+                    content: result.content,
+                    reasoning_content: result.reasoning_content || null,
+                    tool_calls: result.tool_calls
+                },
+                finish_reason: result.finish_reason
+            }]
+        }
     };
 }
 
-async function handleLightMode(originalContent, messages, assistantMsg, streamMsgEl) {
-    console.log('[LightMode] process:', originalContent);
-
-    // 检测 [AGENT_MODE]，如果存在则切换到 Agent 模式（保持不变）
-    if (originalContent.includes('[AGENT_MODE]')) {
-        console.log('[LightMode] detected [AGENT_MODE], switch to Agent mode');
-        const cleanContent = originalContent.replace(/\[AGENT_MODE\]\s*/g, '');
-        if (cleanContent.trim()) {
-            addChatMessage(cleanContent, false);
-        }
-        const cleanedMsg = {
-            ...assistantMsg,
-            content: cleanContent
-        };
-        await handleAgentMode(messages, assistantMsg);
-        return;
+// ===== 思考能力判定 =====
+//  · GLM-5.3 / 5.3-Flash 强制思考，官方明确不支持关闭（thinking.type 仅支持 enabled）
+//  · GLM-5.2 及以下、GLM-4.x 以及 DeepSeek 都支持 {"thinking":{"type":"disabled"}}
+// 返回 { paramSupported, canDisable }：决定"关闭深度思考时是否下发 disabled 参数"
+function thinkingCapability(provider, model) {
+    const name = String(model || '').toLowerCase();
+    const p = provider || 'deepseek';
+    if (p === 'zhipu' || /^glm/.test(name)) {
+        const m = name.match(/glm-(\d+)(?:\.(\d+))?/);
+        if (!m) return { paramSupported: true, canDisable: true };
+        const v = parseInt(m[1], 10) * 100 + (m[2] === undefined ? 0 : parseInt(m[2], 10));
+        return { paramSupported: true, canDisable: v < 503 };  // 5.3 及以上强制思考
     }
-
-    // 提取所有工具标记
-    const toolRegex = /<TOOL:([^>]+)>/g;
-    let match;
-    const toolCalls = [];
-    while ((match = toolRegex.exec(originalContent)) !== null) {
-        const { toolName, args, error } = parseToolTag(match[1]);
-        if (error || !toolName) {
-            // 标记解析失败，显示错误并终止
-            addChatMessage(`❌ 工具标记解析失败：${error || '未知错误'}\n\n📄 AI 原始回复：\n${originalContent}`, false);
-            return;
-        }
-        toolCalls.push({ fullMatch: match[0], toolName, args });
-    }
-
-    // 没有工具标记，尝试弱匹配（AI 可能不输出严格格式，包括 Agent 模式下的后续调用）
-    if (toolCalls.length === 0) {
-        const weakCalls = weakMatchToolCalls(originalContent);
-        if (weakCalls.length > 0) {
-            console.log('[LightMode] 弱匹配命中:', weakCalls);
-            toolCalls.push(...weakCalls);
-        }
-    }
-
-    // 仍然没有工具标记，直接显示原文（流式路径下气泡已实时渲染，无需重复添加）
-    if (toolCalls.length === 0) {
-        if (streamMsgEl) return;
-        addChatMessage(originalContent, false);
-        return;
-    }
-
-    // 准备存储执行结果
-    const results = [];
-    let hasError = false;
-
-    // 顺序执行所有工具
-    for (const tc of toolCalls) {
-        console.log('[LightMode] exec:', tc.toolName, tc.args);
-        // ===== generate_image 特殊处理：先显示占位图 =====
-        if (tc.toolName === 'generate_image') {
-            const placeholderMsg = document.createElement('div');
-            placeholderMsg.className = 'chat-message from-pet';
-            placeholderMsg.innerHTML = `<div class="image-placeholder">
-                <div class="image-placeholder-spinner"></div>
-                <div class="image-placeholder-text">🎨 图片生成中...</div>
-            </div>`;
-            floatChatLog.appendChild(placeholderMsg);
-            floatChatLog.scrollTop = floatChatLog.scrollHeight;
-
-            const result = await executeToolHandler(tc.toolName, tc.args, 30000);
-
-            if (result && result.success && result.data && result.data.url) {
-                placeholderMsg.innerHTML = `<img src="${result.data.url}" alt="生成的图片" class="chat-image" loading="lazy" />`;
-                results.push({ toolName: tc.toolName, args: tc.args, result, fullMatch: tc.fullMatch });
-            } else {
-                placeholderMsg.innerHTML = `<div class="image-placeholder image-placeholder-error">
-                    ❌ 图片生成失败：${result?.error || '未知错误'}
-                </div>`;
-                displayToolResult(tc.toolName, tc.args, { success: false, error: result?.error || '未知错误' });
-                let errorContent = originalContent.replace(tc.fullMatch, `❌ ${tc.toolName} 执行失败`);
-                addChatMessage(errorContent, false);
-                hasError = true;
-                break;
-            }
-            continue;
-        }
-        // ===== 其他工具：正常流程 =====
-        try {
-            const result = await executeToolHandler(tc.toolName, tc.args);
-            if (!result || !result.success) {
-                // 失败时也创建可折叠的结果面板
-                displayToolResult(tc.toolName, tc.args, { success: false, error: result?.error || '未知错误' });
-                // 显示 AI 原始内容（工具标记替换为错误提示）
-                let errorContent = originalContent.replace(tc.fullMatch, `❌ ${tc.toolName} 执行失败`);
-                addChatMessage(errorContent, false);
-                hasError = true;
-                break;
-            }
-            results.push({ toolName: tc.toolName, args: tc.args, result, fullMatch: tc.fullMatch });
-        } catch (e) {
-            // 异常时也创建可折叠的结果面板
-            displayToolResult(tc.toolName, tc.args, { success: false, error: e.message || '工具执行异常' });
-            let errorContent = originalContent.replace(tc.fullMatch, `❌ ${tc.toolName} 执行异常`);
-            addChatMessage(errorContent, false);
-            hasError = true;
-            break;
-        }
-    }
-
-    if (hasError) return;
-
-    // 全部成功：构建 finalContent（将标记替换为简短提示）
-    let finalContent = originalContent;
-    for (const r of results) {
-        // 替换标记为 "✅ 工具名 执行成功"
-        const shortMsg = `✅ ${r.toolName} 执行成功`;
-        finalContent = finalContent.replace(r.fullMatch, shortMsg);
-    }
-
-    // 显示 AI 消息（含简短提示），流式路径直接更新已有气泡
-    if (streamMsgEl) {
-        streamMsgEl.innerHTML = renderMarkdown(stripChatMarkers(finalContent));
-    } else {
-        addChatMessage(finalContent, false);
-    }
-
-    // 在消息下方追加可折叠的详细结果
-    for (const r of results) {
-        displayToolResult(r.toolName, r.args, r.result);
-    }
+    if (p === 'deepseek' || /deepseek/.test(name)) return { paramSupported: true, canDisable: true };
+    // 本地 / 中转站：不确定是否接受该参数，不下发
+    return { paramSupported: false, canDisable: false };
 }
 
-// ===== 完整 Agent 模式处理器（多轮 Function Calling） =====
-async function handleAgentMode(messages, firstAssistantMsg) {
-    console.log('[AgentMode] enter full Agent mode');
+// 依据开关与模型能力生成要并入请求体的思考参数（无则空对象）
+function thinkingParamsFor(provider, model, wantThinking) {
+    const cap = thinkingCapability(provider, model);
+    if (!cap.paramSupported) return {};
+    if (!wantThinking) {
+        // 关闭深度思考：能关就明确关掉（否则思考模型会把 reasoning 占满、正文为空）
+        return cap.canDisable ? { thinking: { type: 'disabled' } } : {};
+    }
+    return { thinking: { type: 'enabled' } };
+}
 
-    // 创建可折叠的思考过程容器
-    const thinkingContainer = document.createElement('details');
-    thinkingContainer.className = 'agent-thinking';
-    thinkingContainer.open = true; // 执行过程中展开
+// ===== 深度思考（<think>…</think>）解析 =====
+// 返回 { thinking, answer }：thinking 是推理过程（折叠展示、不朗读、不进历史），answer 是最终答复。
+function extractThink(text) {
+    const raw = String(text == null ? '' : text);
+    if (!raw) return { thinking: '', answer: '' };
+    const blocks = [];
+    let answer = raw.replace(/<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/gi, (m, inner) => {
+        const t = String(inner || '').trim();
+        if (t) blocks.push(t);
+        return '';
+    });
+    // 模型漏写结束标签时：把最后一个未闭合的 <think> 之后的内容整体当作思考
+    const openIdx = answer.search(/<think(?:ing)?>/i);
+    if (openIdx !== -1) {
+        const tail = answer.slice(openIdx).replace(/<\/?think(?:ing)?>/gi, '').trim();
+        if (tail) blocks.push(tail);
+        answer = answer.slice(0, openIdx);
+    }
+    answer = answer.replace(/<\/?think(?:ing)?>/gi, '').replace(/\n{3,}/g, '\n\n').trim();
+    return { thinking: blocks.join('\n\n').trim(), answer };
+}
+
+// 把推理过程渲染成一个可折叠块（样式复用 .agent-thinking）
+function addReasoningBlock(text, beforeEl) {
+    const details = document.createElement('details');
+    details.className = 'agent-thinking reasoning-block';
     const summary = document.createElement('summary');
-    summary.textContent = '🤖 Agent 思考过程';
-    thinkingContainer.appendChild(summary);
-    // 先插入到聊天区域，后续消息直接追加到容器内
-    floatChatLog.appendChild(thinkingContainer);
-    floatChatLog.scrollTop = floatChatLog.scrollHeight;
+    summary.textContent = '🧠 深度思考';
+    const body = document.createElement('div');
+    body.className = 'chat-message from-pet agent-mode';
+    body.textContent = String(text);
+    details.appendChild(summary);
+    details.appendChild(body);
+    if (beforeEl && beforeEl.parentNode) beforeEl.parentNode.insertBefore(details, beforeEl);
+    else if (floatChatLog) floatChatLog.appendChild(details);
+    if (floatChatLog) floatChatLog.scrollTop = floatChatLog.scrollHeight;
+    return details;
+}
 
-    let lastMsgEl = null;
-    let allThinkingText = []; // 收集所有思考文本，用于聊天记录
+// 流式渲染用：只保留答复部分（正在思考中的内容不实时显示）
+function stripThinkForDisplay(text) {
+    return extractThink(text).answer;
+}
 
-    // 辅助函数：添加灰色思考消息到折叠容器
-    function addThinkingMessage(text) {
-        if (!text || !text.trim()) return null;
-        const msg = document.createElement('div');
-        msg.className = 'chat-message from-pet agent-mode';
-        msg.textContent = text.trim();
-        thinkingContainer.appendChild(msg);
-        floatChatLog.scrollTop = floatChatLog.scrollHeight;
-        allThinkingText.push(text.trim());
-        return msg;
-    }
-
-    // 1. 处理第一次回复（显示在折叠容器中）
-    let firstContent = firstAssistantMsg.content || '';
-    if (firstContent.includes('[AGENT_MODE]')) {
-        firstContent = firstContent.replace(/\[AGENT_MODE\]\s*/g, '');
-        firstAssistantMsg.content = firstContent;
-    }
-    messages.push(firstAssistantMsg);
-
-    // 显示第一次回复（灰色）
-    if (firstContent.trim()) {
-        lastMsgEl = addThinkingMessage(firstContent);
-    }
-
-    // 从第一次回复中提取弱匹配工具调用并执行
-    if (firstContent) {
-        const weakCalls = weakMatchToolCalls(firstContent);
-        if (weakCalls.length > 0) {
-            console.log('[AgentMode] first reply weak match:', weakCalls);
-            for (const wc of weakCalls) {
-                const result = await executeToolHandler(wc.toolName, wc.args);
-                if (!result.success) {
-                    addChatMessage(`❌ 工具 ${wc.toolName} 执行失败：${result.error || '未知错误'}`, false);
-                } else {
-                    displayToolResult(wc.toolName, wc.args, result, lastMsgEl);
-                    messages.push({
-                        role: 'tool',
-                        tool_call_id: `weak_${wc.toolName}_${Date.now()}`,
-                        content: JSON.stringify(result)
-                    });
-                }
-            }
+// ===== 发送前规范化消息数组 =====// 智谱 GLM 对 role / tool_call_id 校验严格：任一消息缺 role 就整轮 400
+// 「1214 角色信息不能为空」。这里兜底补齐（并按内容猜角色），同时告警便于定位来源。
+const VALID_CHAT_ROLES = new Set(['system', 'user', 'assistant', 'tool']);
+// keepReasoning：请求带 tools 且该提供商要求回传 reasoning_content 时为 true
+// （DeepSeek / 智谱官方规定：带 tools 的多轮必须完整回传 reasoning_content，否则 400）
+function sanitizeChatMessages(list, keepReasoning) {
+    if (!Array.isArray(list)) return [];
+    const out = [];
+    list.forEach((m, i) => {
+        if (!m || typeof m !== 'object') {
+            console.warn('[float] 丢弃非法消息 #' + i + ':', JSON.stringify(m));
+            return;
         }
-    }
+        let role = String(m.role == null ? '' : m.role).trim();
+        if (!VALID_CHAT_ROLES.has(role)) {
+            const hasToolCalls = Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
+            const guess = hasToolCalls ? 'assistant' : (m.tool_call_id ? 'tool' : 'user');
+            console.warn('[float] 消息 #' + i + ' 缺少合法 role（原值 ' + JSON.stringify(m.role) + '），已按 "' + guess + '" 兜底');
+            role = guess;
+        }
+        const msg = { role };
+        msg.content = (m.content === undefined || m.content === null) ? '' : m.content;
+        if (role === 'assistant') {
+            if (Array.isArray(m.tool_calls) && m.tool_calls.length) msg.tool_calls = m.tool_calls;
+            if (keepReasoning && m.reasoning_content) msg.reasoning_content = m.reasoning_content;
+        }
+        if (role === 'tool') {
+            if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
+            if (typeof msg.content !== 'string') msg.content = JSON.stringify(msg.content);
+        }
+        out.push(msg);
+    });
+    return out;
+}
 
-    // 处理首次回复中已携带的 tool_calls（主请求已上传 tools 参数时可能直接返回；
-    // 需先回填 tool 消息，下一次请求才是合法的 Function Calling 上下文）
-    if (firstAssistantMsg.tool_calls && firstAssistantMsg.tool_calls.length > 0) {
-        const toolResults = [];
-        let hasError = false;
-        for (const toolCall of firstAssistantMsg.tool_calls) {
-            const toolName = toolCall.function.name;
+// ===== 统一 AI 请求（带重试与备选回退）=====
+// mode: 'chat' | 'companion' | 'memory' | 'vision'，决定主模型与备选顺序
+// 候选链 = 当前提供商主模型 → 当前提供商备选模型 → 其它已配置提供商（可在设置里关掉）
+async function requestChatCompletion({ mode = 'chat', body, onDelta, onStatus }) {
+    const AI = requireAIF();
+    const chain = AI.buildChain(config, mode);
+    const policy = AI.retryPolicy(config);
+    const res = await AI.runChain({
+        chain,
+        policy,
+        // 规范化放在每次尝试里：reasoning 是否回传取决于"该候选所属提供商 + 是否带 tools"
+        attempt: (candidate) => attemptChatCompletion(candidate, body, onDelta),
+        onAttempt: (info) => {
+            if (typeof onStatus === 'function') onStatus(info);
+            if (info.phase === 'retry') console.warn(`[float] ${info.candidate.model} 繁忙，重试 ${info.attempt}/${info.maxTries}`);
+            else if (info.usedFallback) console.warn(`[float] 切换到备选模型：${info.candidate.provider}/${info.candidate.model || '(默认)'}`);
+        },
+        log: (level, msg) => { if (level === 'warn') console.warn(msg); else console.log(msg); }
+    });
+    if (!res.ok) throw new Error(res.error || 'AI 调用失败');
+    return res.data || { choices: [{ message: { content: res.content } }] };
+}
+
+// ===== 单轮对话主循环（取代旧的 handleLightMode / handleAgentMode 双轨实现）=====
+// 设计原则（对应本次重构）：
+//   1. 一轮对话 = 一条 assistant 消息；content（用户可见答复）与 tool_calls（动作）共存，
+//      互不替代 —— content 永远正常显示，不再被折叠成"思考过程"。
+//   2. reasoning（reasoning_content / <think>）只进可折叠的「深度思考」块：
+//      不当作答复显示、不进 chatHistory、不交给 TTS。
+//   3. 只认标准 tool_calls。旧的文本弱匹配（把"我将调用 get_time"这种叙述当指令执行）
+//      已彻底删除，避免寒暄被误判成 agent 任务。
+//   4. 循环安全：轮次上限 + 每轮工具数上限 + 同参数重复调用复用上次结果 + 工具报错回传模型
+//      （而不是把思考当答复返回）。
+const AGENT_MAX_ROUNDS = 3;       // 工具循环上限（首次请求算第 0 轮）
+const AGENT_MAX_TOOLS_PER_ROUND = 4;
+const AGENT_TOOL_TIMEOUT_MS = 20000;
+
+function toolSignature(name, args) {
+    try { return name + '|' + JSON.stringify(args || {}); } catch (e) { return name + '|'; }
+}
+
+// 用 Promise.race 给单个工具加超时，避免某个工具卡死整轮对话
+function withTimeout(promise, ms, label) {
+    return Promise.race([
+        promise,
+        new Promise((resolve) => setTimeout(() => resolve({ success: false, error: label + ' 执行超时' }), ms))
+    ]);
+}
+
+async function runChatTurn({ messages, firstAssistantMsg, streamMsgEl, mode, useVision, makeBody }) {
+    const visibleParts = [];   // 用户可见正文（进历史 + TTS）
+    const thinkingParts = [];  // 推理过程（只折叠展示）
+    const toolCache = new Map(); // 同参数工具调用复用结果，避免模型反复 get_time 这类死循环
+    let assistantMsg = firstAssistantMsg;
+    let round = 0;
+    let roundStreamEl = streamMsgEl || null;
+
+    // 深度思考块：只在"深度思考开启"时展示（关闭后即便模型仍返回推理也不显示）
+    const showReasoning = (text) => {
+        if (!config.deepThinking) return;
+        if (!text || !text.trim()) return;
+        thinkingParts.push(text.trim());
+        addReasoningBlock(text.trim(), roundStreamEl || null);
+    };
+
+    // 渲染/定型本轮的用户可见答复：
+    // 若本轮已有流式气泡就直接定型（避免"流式气泡 + addChatMessage"出现重复气泡），
+    // 否则新建一条消息。
+    const showVisible = (text) => {
+        const clean = String(text || '').trim();
+        if (!clean) return;
+        if (roundStreamEl) {
+            roundStreamEl.className = 'chat-message from-pet';
+            roundStreamEl.innerHTML = renderMarkdown(stripChatMarkers(stripThinkForDisplay(clean)));
+            floatChatLog.scrollTop = floatChatLog.scrollHeight;
+        } else {
+            addChatMessage(clean, false, false);
+        }
+    };
+
+    while (round <= AGENT_MAX_ROUNDS) {
+        const isFirstRound = round === 0;
+        const split = extractThink(assistantMsg.content == null ? '' : assistantMsg.content);
+        const roundText = split.answer;
+        const reasoning = [assistantMsg.reasoning_content, split.thinking].filter(Boolean).join('\n\n');
+
+        if (reasoning) showReasoning(reasoning);
+        if (roundText.trim()) visibleParts.push(roundText.trim());
+
+        // 回填 assistant 消息：content 与 reasoning_content 都带上，
+        // 是否真的把 reasoning 回传由 sanitizeChatMessages 按 provider 能力决定
+        const echo = {
+            role: 'assistant',
+            content: roundText,
+            tool_calls: Array.isArray(assistantMsg.tool_calls) ? assistantMsg.tool_calls : undefined
+        };
+        if (reasoning) echo.reasoning_content = reasoning;
+        messages.push(echo);
+
+        const toolCalls = Array.isArray(assistantMsg.tool_calls) ? assistantMsg.tool_calls.slice(0, AGENT_MAX_TOOLS_PER_ROUND) : [];
+        if (!toolCalls.length) {
+            showVisible(roundText, isFirstRound);
+            break;
+        }
+        if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > AGENT_MAX_TOOLS_PER_ROUND) {
+            console.warn('[turn] 本轮工具调用过多，已截断到 ' + AGENT_MAX_TOOLS_PER_ROUND + ' 个');
+        }
+
+        // 先把模型这一轮说的话按"正常答复"渲染出来（工具结果随后折叠在下面）
+        showVisible(roundText, isFirstRound);
+        roundStreamEl = null;
+
+        for (const toolCall of toolCalls) {
+            const toolName = toolCall.function && toolCall.function.name;
+            if (!toolName) continue;
             let args = {};
-            try { args = JSON.parse(toolCall.function.arguments || '{}'); } catch (e) { args = {}; }
-            console.log('[AgentMode] 执行首次工具:', toolName, args);
-            const result = await executeToolHandler(toolName, args);
-            if (!result.success) {
-                addChatMessage(`❌ 工具 ${toolName} 执行失败：${result.error || '未知错误'}`, false);
-                hasError = true;
-                break;
+            try { args = JSON.parse((toolCall.function && toolCall.function.arguments) || '{}'); } catch (e) { args = {}; }
+            const sig = toolSignature(toolName, args);
+
+            let result;
+            if (toolCache.has(sig)) {
+                result = toolCache.get(sig);
+                console.log('[turn] 复用上次工具结果:', toolName);
+                displayToolResult(toolName, args, result);
+            } else {
+                console.log('[turn] 执行工具:', toolName, args);
+                result = await withTimeout(executeToolHandler(toolName, args), AGENT_TOOL_TIMEOUT_MS, toolName);
+                toolCache.set(sig, result);
+                displayToolResult(toolName, args, result);
             }
-            displayToolResult(toolName, args, result, lastMsgEl);
-            toolResults.push({
+
+            // 工具失败也回传给模型（让它自己解释或换方案），不再中断整轮对话
+            messages.push({
                 role: 'tool',
                 tool_call_id: toolCall.id,
-                content: JSON.stringify(result)
+                content: JSON.stringify(result && result.success === false
+                    ? { success: false, error: result.error || '工具执行失败' }
+                    : result)
             });
         }
-        if (hasError) {
-            thinkingContainer.open = false;
-            return allThinkingText.join('\n');
+
+        round++;
+        if (round > AGENT_MAX_ROUNDS) {
+            console.warn('[turn] 达到工具轮次上限 ' + AGENT_MAX_ROUNDS + '，停止继续调用工具');
+            break;
         }
-        messages.push(...toolResults);
-    }
 
-    let round = 0;
-    const MAX_ROUNDS = 5;
-    let finalResponse = '';
-
-    while (round < MAX_ROUNDS) {
-        // 请求 API（携带 agentTools，DeepSeek Function Calling）
-        const agCred = chatCredentials();
-        const agentApiUrl = agCred.base;
-        const agentApiKey = agCred.key;
-        const agProvider = config.multimodalProvider || 'deepseek';
-        const agHasKey = !!agCred.key;
-        const useVision = !!(config.multimodalEnabled && agProvider === 'deepseek' && agHasKey);
-        const agentModel = useVision ? 'deepseek-v4-flash-vision-exp' : 'deepseek-v4-flash';
-
-        const agentBody = {
-            model: agentModel,
-            messages: messages,
-            max_tokens: 2048,
-            temperature: 0.8
-        };
-        if (!useVision) { agentBody.tools = agentTools; agentBody.tool_choice = 'auto'; }
-        // chat 与 vision 均走 SSE 流式，实时渲染本轮回复（先以思考样式显示在折叠容器中）
-        let roundStreamEl = null;
-        const roundOnDelta = (fullText) => {
-            if (!roundStreamEl) {
-                roundStreamEl = document.createElement('div');
-                roundStreamEl.className = 'chat-message from-pet agent-mode';
-                thinkingContainer.appendChild(roundStreamEl);
-                floatChatLog.scrollTop = floatChatLog.scrollHeight;
-            }
-            roundStreamEl.textContent = fullText.trim();
-            floatChatLog.scrollTop = floatChatLog.scrollHeight;
-        };
-
+        // 进入下一轮：重新请求（带上工具结果）
         let data;
-        // chat 与 vision 模型均走 SSE 流式，实时渲染本轮回复到思考容器
-        data = await requestChatCompletion({ apiUrl: agentApiUrl, apiKey: agentApiKey, body: agentBody, onDelta: roundOnDelta });
-        const assistantMsg = data.choices[0].message;
-        let content = assistantMsg.content || '';
-
-        // ===== 检测 [AGENT_MODE]：追加到折叠容器 =====
-        if (content.includes('[AGENT_MODE]')) {
-            const cleanContent = content.replace(/\[AGENT_MODE\]\s*/g, '');
-            if (roundStreamEl) {
-                // 流式气泡已显示原文，这里就地替换为去标记文本
-                roundStreamEl.textContent = cleanContent.trim();
-                if (cleanContent.trim()) allThinkingText.push(cleanContent.trim());
-                lastMsgEl = roundStreamEl;
-            } else if (cleanContent.trim()) {
-                lastMsgEl = addThinkingMessage(cleanContent);
-            }
-            messages.push({
-                role: 'assistant',
-                content: cleanContent,
-                tool_calls: assistantMsg.tool_calls
-            });
-            round++;
-            continue;
-        }
-
-        // 没有 [AGENT_MODE]，正常处理
-        messages.push({
-            role: 'assistant',
-            content: content || null,
-            tool_calls: assistantMsg.tool_calls
-        });
-
-        // 检查是否有工具调用（标准 Function Calling）
-        if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
-            // 流式气泡即本轮思考显示，登记为最后一条消息（工具结果将折叠在其下）
-            if (roundStreamEl) {
-                if (content.trim()) allThinkingText.push(content.trim());
-                lastMsgEl = roundStreamEl;
-            }
-            const toolResults = [];
-            let hasError = false;
-
-            for (const toolCall of assistantMsg.tool_calls) {
-                const toolName = toolCall.function.name;
-                let args = {};
-                try {
-                    args = JSON.parse(toolCall.function.arguments || '{}');
-                } catch (e) {
-                    args = {};
-                }
-
-                console.log('[AgentMode] exec tool:', toolName, args);
-                const result = await executeToolHandler(toolName, args);
-
-                if (!result.success) {
-                    addChatMessage(`❌ 工具 ${toolName} 执行失败：${result.error || '未知错误'}`, false);
-                    hasError = true;
-                    break;
-                }
-
-                displayToolResult(toolName, args, result, lastMsgEl);
-
-                toolResults.push({
-                    role: 'tool',
-                    tool_call_id: toolCall.id,
-                    content: JSON.stringify(result)
-                });
-            }
-
-            if (hasError) {
-                // 失败时也折叠思考容器
-                thinkingContainer.open = false;
-                return allThinkingText.join('\n');
-            }
-
-            messages.push(...toolResults);
-            round++;
-            continue;
-        }
-
-        // 无 tool_calls，检查是否有弱匹配工具调用
-        if (content) {
-            const weakCalls = weakMatchToolCalls(content);
-            if (weakCalls.length > 0) {
-                if (roundStreamEl) {
-                    // 流式气泡即本轮思考显示
-                    if (content.trim()) allThinkingText.push(content.trim());
-                    lastMsgEl = roundStreamEl;
-                }
-                console.log('[AgentMode] weak match:', weakCalls);
-                const toolResults = [];
-                let hasError = false;
-                for (const wc of weakCalls) {
-                    console.log('[AgentMode] weak exec tool:', wc.toolName, wc.args);
-                    const result = await executeToolHandler(wc.toolName, wc.args);
-                    if (!result.success) {
-                        addChatMessage(`❌ 工具 ${wc.toolName} 执行失败：${result.error || '未知错误'}`, false);
-                        hasError = true;
-                        break;
+        try {
+            data = await requestChatCompletion({
+                mode,
+                body: makeBody(messages),
+                onDelta: (fullText) => {
+                    if (!roundStreamEl) {
+                        roundStreamEl = document.createElement('div');
+                        roundStreamEl.className = 'chat-message from-pet';
+                        floatChatLog.appendChild(roundStreamEl);
                     }
-                    displayToolResult(wc.toolName, wc.args, result, lastMsgEl);
-                    toolResults.push({
-                        role: 'tool',
-                        tool_call_id: `weak_${wc.toolName}_${Date.now()}`,
-                        content: JSON.stringify(result)
-                    });
+                    roundStreamEl.innerHTML = renderMarkdown(stripChatMarkers(stripThinkForDisplay(fullText)));
+                    floatChatLog.scrollTop = floatChatLog.scrollHeight;
                 }
-                if (hasError) {
-                    thinkingContainer.open = false;
-                    return allThinkingText.join('\n');
-                }
-                messages.push(...toolResults);
-                round++;
-                continue;
-            }
+            });
+        } catch (e) {
+            console.warn('[turn] 后续轮次请求失败:', e && e.message);
+            break;
         }
-
-        // 无 tool_calls、无 [AGENT_MODE]、无弱匹配 → 视为最终回复
-        // 折叠思考容器
-        thinkingContainer.open = false;
-        // 以蓝色（正常样式）显示最终回复
-        if (content) {
-            if (roundStreamEl) {
-                // 流式气泡已实时渲染完成：移出思考容器并转为最终回复样式
-                roundStreamEl.className = 'chat-message from-pet';
-                roundStreamEl.innerHTML = renderMarkdown(stripChatMarkers(content));
-                floatChatLog.appendChild(roundStreamEl);
-                floatChatLog.scrollTop = floatChatLog.scrollHeight;
-            } else {
-                addChatMessage(content, false, false);
-            }
+        if (!data || !data.choices || !data.choices[0] || !data.choices[0].message) {
+            console.warn('[turn] 后续轮次返回为空');
+            break;
         }
-        finalResponse = content;
-        break;
+        assistantMsg = data.choices[0].message;
     }
 
-    if (round >= MAX_ROUNDS) {
-        thinkingContainer.open = false;
-        addChatMessage('⏳ 操作步骤过多，请简化请求或重试。', false);
+    if (!visibleParts.length) {
+        // 模型只调工具没说话：给一句兜底，避免"完全没有回复"
+        visibleParts.push('（已经帮你处理好了）');
     }
-    console.log('[AgentMode] done');
-    // 返回完整内容（思考过程 + 最终回复），用于聊天记录
-    const fullContent = allThinkingText.join('\n') + (finalResponse ? '\n' + finalResponse : '');
-    return fullContent.trim();
+    return { visibleText: visibleParts.join('\n'), thinkingText: thinkingParts.join('\n\n'), rounds: round };
 }
 
 // ===== 发送聊天消息（双模式：轻量模式默认，Agent 模式按需触发） =====
@@ -4904,9 +6188,12 @@ async function sendFloatChatMessage(text) {
     addChatMessage(cleanText, true);
     floatChatInput.value = '';
 
-    // 多模态：截屏 -> 上传 Files API -> 拿到 file_id -> 嵌入 content（本地同步缓存供记忆使用）
+    // 多模态：截屏 -> 压缩 -> （DeepSeek 才上传拿 file_id）-> 仅驻内存（不落盘）
     const mmProvider = config.multimodalProvider || 'deepseek';
-    const mmHasKey = mmProvider === 'zhipu' ? !!config.zhipuApiKey : !!config.apiKey;
+    const mmHasKey = mmProvider === 'zhipu' ? !!config.zhipuApiKey
+        : mmProvider === 'custom' ? !!config.customApiKey
+        : mmProvider === 'local' ? !!config.localApiUrl
+        : !!config.apiKey;
     const loadingIndicator = document.getElementById('loadingIndicator');
     let userContent = cleanText;
     if (config.multimodalEnabled && mmHasKey) {
@@ -4914,19 +6201,37 @@ async function sendFloatChatMessage(text) {
             if (loadingIndicator) loadingIndicator.style.display = 'flex';
             const up = await window.electronAPI.uploadScreenshot();
             if (up && up.fileId) {
-                userContent = [
-                    { type: 'text', text: cleanText },
-                    { type: 'file', file_id: up.fileId }
-                ];
+                if (up.remote !== false) {
+                    // DeepSeek：Files API 的 file_id 块
+                    userContent = [
+                        { type: 'text', text: cleanText },
+                        { type: 'file', file_id: up.fileId }
+                    ];
+                } else if (up.dataUrl && (mmProvider === 'zhipu' || mmProvider === 'custom')) {
+                    // GLM / 中转站：OpenAI 兼容的 image_url + data URL（不落云端、不落盘）
+                    userContent = [
+                        { type: 'text', text: cleanText },
+                        { type: 'image_url', image_url: { url: up.dataUrl } }
+                    ];
+                } else if (up.dataUrl && mmProvider === 'local' && config.localVisionModel) {
+                    // 本地 LLM：只有用户显式填了视觉模型时才带图（否则纯文本模型会报错）
+                    userContent = [
+                        { type: 'text', text: cleanText },
+                        { type: 'image_url', image_url: { url: up.dataUrl } }
+                    ];
+                }
                 pendingConversationImages.push({
                     fileId: up.fileId,
-                    imagePath: up.imagePath,
-                    imageUrl: up.imageUrl,
+                    dataUrl: up.dataUrl || '',
+                    remote: up.remote !== false,
+                    // 瞬态截图不落盘，imagePath/imageUrl 在"进入记忆"时才由主进程生成
+                    imagePath: '',
+                    imageUrl: '',
                     time: Date.now()
                 });
             }
         } catch (e) {
-            const detail = 'multimodal screenshot upload failed: ' + (e && e.message) + ' code=' + (e && e.code) + ' | apiUrl=' + config.apiUrl + ' | multimodalEnabled=' + config.multimodalEnabled + ' | provider=' + mmProvider + ' | hasKey=' + mmHasKey;
+            const detail = 'multimodal screenshot capture failed: ' + (e && e.message) + ' code=' + (e && e.code) + ' | apiUrl=' + config.apiUrl + ' | multimodalEnabled=' + config.multimodalEnabled + ' | provider=' + mmProvider + ' | hasKey=' + mmHasKey;
             console.warn('[float]', detail);
             if (window.electronAPI && window.electronAPI.logToMain) window.electronAPI.logToMain('error', '[float:upload] ' + detail);
         } finally {
@@ -4935,12 +6240,18 @@ async function sendFloatChatMessage(text) {
     }
     chatHistory.push({ role: 'user', content: userContent });
 
-    if (!config.apiKey) {
-        const reply = '请先在设置中配置 API Key~';
-        addChatMessage(reply, false);
-        chatHistory.push({ role: 'assistant', content: reply });
-        speakText(reply);
-        return;
+    // 凭据校验按"当前提供商"判断（此前写死 config.apiKey，导致 GLM/中转站/本地一律被拦）
+    {
+        const gateCred = chatCredentials();
+        const gateProvider = config.multimodalProvider || 'deepseek';
+        const missing = !gateCred.base || (gateProvider !== 'local' && !gateCred.key);
+        if (missing) {
+            const reply = '请先在设置中配置 API Key~';
+            addChatMessage(reply, false);
+            chatHistory.push({ role: 'assistant', content: reply });
+            speakText(reply);
+            return;
+        }
     }
 
     // ===== 第三步：构建 AI 请求 =====
@@ -4963,32 +6274,50 @@ async function sendFloatChatMessage(text) {
         const replyLengthRule = (config.aiReplyLength > 0)
             ? `\n【回复长度】每次回复正文不要超过 ${config.aiReplyLength} 字，简洁作答。`
             : '';
-        const systemPrompt = `${config.aiPrompt}
-${replyLengthRule}
-【工具使用】
-你可以通过标准的 function calling 机制调用工具（请勿输出 <TOOL:...> 文本标记）。
+        // 屏幕感知由多模态开关统一负责（启用时对话已自动附带截图），
+        // 不再向模型暴露截图分析类工具，避免模型重复主动截屏。
+        const mmActive = !!(config.multimodalEnabled && mmProvider === 'deepseek' && !!chatCredentials().key);
+        const toolList = [
+            '- open_app(app)：打开本地应用（计算器、记事本、浏览器、微信、QQ、VS Code、文件管理器）',
+            '- open_url(url)：在浏览器打开网址',
+            '- get_weather(city)：查询城市天气',
+            '- volume(action, level)：音量控制（action=set 传入 level 0-100 / action=get）',
+            '- get_system_info()：获取系统信息（CPU/内存/磁盘）',
+            '- generate_image(prompt, size)：根据描述生成一张图片',
+            '- program(action, ...)：程序管理（list / describe / run / save / update / delete）'
+        ].join('\n');
+        // 深度思考：模型先输出 <think>…</think> 再给答复（类似 DeepSeek 客户端）
+        const thinkRule = config.deepThinking
+            ? `\n【深度思考】先在心里推理，把推理过程放进 <think>…</think>（可以多段、可换行），然后另起一段输出最终答复。\n最终答复里不要再出现 <think> 标签，也不要复述推理内容。`
+            : '';
+        // Agent 开关：关闭后不提供任何工具，模型只能纯文本回复
+        const agentOn = config.agentEnabled !== false;
+        const toolSection = agentOn
+            ? `【工具使用】
+你可以通过标准的 function calling 机制调用工具。**只有确实需要外部信息或执行动作时才调用**：
+打招呼、闲聊、情感回应、吐槽、聊设定/剧情、问你已经知道的事 —— 直接用文字回答，不要调用任何工具。
+当前时间、天气、桌宠状态等已经写在对话上下文里，不需要为了"看一眼"而调用工具。
 需要调用工具时直接发起工具调用；如需多步/多轮，依次调用并依据结果继续，最后给出简洁答复。
+不要在正文里写"我将调用 xxx 函数""我需要调用某工具"这类过程叙述，只输出对主人说的话。
 
 可用工具：
-- open_app(app)：打开本地应用（计算器、记事本、浏览器、微信、QQ、VS Code、文件管理器）
-- open_url(url)：在浏览器打开网址
-- get_weather(city)：查询城市天气
-- get_time()：获取当前时间
-- volume(action, level)：音量控制（action=set 传入 level 0-100 / action=get）
-- screenshot()：截屏保存到桌面
-- get_system_info()：获取系统信息（CPU/内存/磁盘）
-- capture_screen()：捕获当前屏幕并返回一段简短描述
-- vision(question)：截取当前屏幕并用视觉模型 deepseek-v4-flash-vision-exp 分析，回答 question（识别文字、图表、界面状态）
-- generate_image(prompt, size)：根据描述生成一张图片
-- program(action, ...)：程序管理（list / describe / run / save / update / delete）
+${toolList}
+
+【多轮工具使用】
+一次对话最多可连续调用几轮工具，依据前一次工具结果决定是否继续；完成任务后给出最终简洁答复。
+工具没必要时就别调用，宁可少调用也不要为了"显得在做事"而调用。`
+            : `【能力范围】
+你没有任何工具/函数调用能力，也不要去描述或假装调用工具。只能用纯文本回答，
+可以结合对话上下文、看到的屏幕截图和记忆来回应。`;
+
+        const systemPrompt = `${config.aiPrompt}
+${replyLengthRule}${thinkRule}
+${toolSection}
 
 【回复格式】
 可带 <MOOD:心情>，可选心情仅限：${moodList.length ? moodList.join('、') : '（无可选心情）'}。
 可带 <STATE:状态> 标记桌宠可切换的动作状态，可用状态：${selectableStates().map(stateLabel).join('、')}。
-<MOOD:心情> 会切换聊天左侧立绘；<STATE:状态> 会切换桌宠本体动作。请只选用上面列出的名称。
-
-【多轮工具使用】
-一次对话可连续调用多个工具，依据前一次工具结果决定是否继续调用，完成任务后给出最终简洁答复。`;
+<MOOD:心情> 会切换聊天左侧立绘；<STATE:状态> 会切换桌宠本体动作。请只选用上面列出的名称。`;
 
         // ===== 动态上下文（只追加，不进 system，保证 system 首条完全固定）=====
         const dynamicContext =
@@ -5007,13 +6336,13 @@ ${statsStr}${memoryStr}${behaviorStr}${ctxStr}`;
             messages.push({ role: 'user', content: dynamicContext });
         }
 
-        // ===== AI 请求（DeepSeek） =====
+        // ===== AI 请求（按当前提供商路由） =====
+        // 注意：mmProvider 已在 sendMessage 外层作用域声明（L5206），此处直接复用，
+        // 不再重复 const 声明，否则会遮蔽外层变量并在此闭包更早引用处触发 TDZ。
         const cred = chatCredentials();
-        const apiUrl = cred.base;
-        const apiKey = cred.key;
         // 多模态（DeepSeek）开启时，对话嵌入了 file_id 图片块，必须使用 vision 模型才能理解图片
         const useVision = !!(config.multimodalEnabled && mmProvider === 'deepseek' && !!cred.key);
-        const model = useVision ? 'deepseek-v4-flash-vision-exp' : 'deepseek-v4-flash';
+        const model = providerModelName();
 
         // ===== vision 模型：把已保存的图像记忆以真实图片（file_id）随请求发送 =====
         // 若只把 description 文本拼进 memoryStr，模型永远"看不见"记忆里的图片；
@@ -5036,17 +6365,18 @@ ${statsStr}${memoryStr}${behaviorStr}${ctxStr}`;
         // 显示加载动画
         if (loadingIndicator) loadingIndicator.style.display = 'flex';
 
-        // 发起主请求（携带 tools 参数，走 OpenAI 兼容 Function Calling）
+        // 发起主请求（Agent 开启时携带 tools，走 OpenAI 兼容 Function Calling）
         // vision 模型用于看图，不携带 tools（避免部分模型不支持函数调用导致报错）
-        const requestBody = {
+        const requestBody = Object.assign({
             model: model,
             messages: messages,
             // 推理模型会先用大量 token 生成 reasoning_content（如分析截图），预算太小会
             // 在产出正文前就 finish_reason=length 导致 content 为空，因此给足 2048
             max_tokens: 2048,
             temperature: 0.8
-        };
-        if (!useVision) {
+        }, thinkingParamsFor(mmProvider, model, !!config.deepThinking));
+        // 只有「Agent 开关打开 + 非视觉 + 非本地」才提供工具
+        if (agentOn && !useVision && mmProvider !== 'local') {
             requestBody.tools = agentTools;
             requestBody.tool_choice = 'auto';
         }
@@ -5061,11 +6391,13 @@ ${statsStr}${memoryStr}${behaviorStr}${ctxStr}`;
                 streamMsgEl.className = 'chat-message from-pet';
                 floatChatLog.appendChild(streamMsgEl);
             }
-            streamMsgEl.innerHTML = renderMarkdown(stripChatMarkers(fullText));
+            // 流式阶段隐藏 <think> 内容（推理过程不糊在气泡里，结束后进折叠块）
+            streamMsgEl.innerHTML = renderMarkdown(stripChatMarkers(stripThinkForDisplay(fullText)));
             floatChatLog.scrollTop = floatChatLog.scrollHeight;
         };
         try {
-            data = await requestChatCompletion({ apiUrl, apiKey, body: requestBody, onDelta });
+            // 模型繁忙时按设置重试，仍失败则自动换备选模型（见「回退与重试」）
+            data = await requestChatCompletion({ mode: useVision ? 'vision' : 'chat', body: requestBody, onDelta });
         } finally {
             if (loadingIndicator) loadingIndicator.style.display = 'none';
         }
@@ -5078,7 +6410,12 @@ ${statsStr}${memoryStr}${behaviorStr}${ctxStr}`;
             throw new Error('API 返回为空或无 choices');
         }
         const assistantMsg = data.choices[0].message;
-        const content = assistantMsg.content || '';
+        // 深度思考：把 <think>…</think> 拆出来（单独折叠展示），正文只留答复本身
+        const thinkSplit = extractThink(assistantMsg.content || '');
+        const content = thinkSplit.answer;
+        if (thinkSplit.thinking) {
+            assistantMsg.reasoning_content = [assistantMsg.reasoning_content, thinkSplit.thinking].filter(Boolean).join('\n\n');
+        }
         const hasToolCalls = !!(assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0);
 
         // 为空且无工具调用：不自动重试，给出"重试"按钮复用同一请求；同时打印原始响应便于排查
@@ -5094,27 +6431,28 @@ ${statsStr}${memoryStr}${behaviorStr}${ctxStr}`;
             return;
         }
 
-        // ===== 第四步：判断模式 =====
-        let isAgentMode = false;
-        let agentFinalResponse = '';
-        // 主请求已携带 tools 参数，模型可能直接返回结构化 tool_calls
-        if (hasToolCalls || content.includes('[AGENT_MODE]')) {
-            isAgentMode = true;
-            // 进入 Agent 模式：移除已流式渲染的气泡（其内容会以思考样式重新渲染到折叠容器）
-            if (streamMsgEl && streamMsgEl.parentNode) streamMsgEl.parentNode.removeChild(streamMsgEl);
-            streamMsgEl = null;
-            // 优先处理模型返回的 OpenAI 兼容 tool_calls；否则走 [AGENT_MODE] 传统入口
-            agentFinalResponse = await handleAgentMode(messages, assistantMsg);
-        } else {
-            await handleLightMode(content, messages, assistantMsg, streamMsgEl);
-        }
+        // ===== 第四步：跑完整一轮对话（含工具循环）=====
+        // 新设计：不再区分"轻量/Agent 两套流程"，统一由 runChatTurn 处理：
+        //  · content（用户可见答复）与 tool_calls（动作）共存，互不替代 —— content 永远正常显示
+        //  · reasoning（reasoning_content / <think>）只进折叠块，不显示成答复、不进历史、不朗读
+        //  · 只认标准 tool_calls；删除文本弱匹配（叙述不再被当成指令）
+        const turn = await runChatTurn({
+            messages,
+            firstAssistantMsg: assistantMsg,
+            streamMsgEl,
+            mode: useVision ? 'vision' : 'chat',
+            useVision,
+            makeBody: (nextMessages) => Object.assign({
+                model: model,
+                messages: nextMessages,
+                max_tokens: 2048,
+                temperature: 0.8,
+                ...((agentOn && !useVision && mmProvider !== 'local') ? { tools: agentTools, tool_choice: 'auto' } : {})
+            }, thinkingParamsFor(mmProvider, model, !!config.deepThinking))
+        });
 
-        // ===== 第五步：更新状态 =====
-        // Agent 模式：只将最终回复（蓝色）计入聊天记录，灰色思考部分不计入
-        // 轻量模式：保持原有逻辑
-        const finalContent = isAgentMode
-            ? agentFinalResponse
-            : content.replace(/<TOOL:[^>]+>/g, '').replace(/\[AGENT_MODE\]/g, '').trim();
+        // ===== 第五步：更新状态（只用用户可见正文）=====
+        const finalContent = turn.visibleText.trim();
 
         if (finalContent) {
             chatHistory.push({ role: 'assistant', content: finalContent });
@@ -5268,6 +6606,8 @@ if (window.electronAPI && window.electronAPI.onConfigUpdated) {
         const changedKeys = Object.keys(data).filter(k => config[k] !== data[k]);
         if (changedKeys.length === 0) return;
         config = { ...config, ...data };
+        // 外观主题变化 → 立即切换（其它窗口同步）
+        if (data.theme !== undefined) applyTheme(data.theme);
         if (data.stickerPack !== undefined) {
             config.stickerPack = data.stickerPack;
             window._stickerPack = data.stickerPack;
@@ -5284,11 +6624,17 @@ if (window.electronAPI && window.electronAPI.onConfigUpdated) {
         // 若当前是设置面板模式，刷新控件显示值（不重新绑定事件）
         if (isSettingsMode) {
             refreshSettingsValues();
-        } else if (typeof data.floatPetSize === 'number' && isFinite(data.floatPetSize) && data.floatPetSize !== currentPetSize) {
-            // 浮窗（桌宠）窗口：直接把新大小应用到渲染与窗口尺寸，避免"数值不变但 float 变默认大小"
-            currentPetSize = data.floatPetSize;
-            document.documentElement.style.setProperty('--float-pet-size', currentPetSize + 'px');
-            if (typeof updateWindowSize === 'function') updateWindowSize();
+        } else {
+            // 浮窗：凡是影响窗口尺寸/布局的设置被其它窗口改动，都要立刻重排。
+            // （过去只处理 floatPetSize，导致「按钮大小 / 贴图与按钮间距 / 贴图上方留白」
+            //   在设置窗口里拖动时浮窗不响应。）
+            const sizeKeys = ['floatPetSize', 'buttonSize', 'floatPetBottomOffset', 'floatWindowHeightPad'];
+            const sizeChanged = sizeKeys.some((k) => data[k] !== undefined && changedKeys.indexOf(k) >= 0);
+            if (typeof data.floatPetSize === 'number' && isFinite(data.floatPetSize)) {
+                currentPetSize = data.floatPetSize;
+                document.documentElement.style.setProperty('--float-pet-size', currentPetSize + 'px');
+            }
+            if (sizeChanged && typeof updateWindowSize === 'function') updateWindowSize();
         }
         console.log('[float] config updated:', changedKeys.join(','));
     });
@@ -5418,16 +6764,19 @@ if (!isSettingsMode && window.electronAPI && window.electronAPI.on) {
 
     // 贴图下方信息条（fixed 于窗口底部，显示时通过 --pet-stat-h 把贴图/按钮顶上去；
     // 可点击：点击唤起/启动 DSH）
+    // 位置：底部动作条（四个按钮）之上，避免遮挡按钮；间距常量与 CSS 保持一致。
     const dshBaseStyle = document.createElement('style');
     dshBaseStyle.textContent =
-        '#petStatBar{position:fixed;left:50%;transform:translateX(-50%);bottom:6px;width:max-content;max-width:calc(100vw - 16px);' +
+        '#petStatBar{position:fixed;left:50%;transform:translateX(-50%);bottom:0;height:' + PET_STAT_H + 'px;box-sizing:border-box;width:max-content;max-width:calc(100vw - 16px);' +
         'background:rgba(20,24,38,.78);color:#dfe4f2;border:1px solid rgba(120,132,255,.25);border-radius:8px;' +
         'padding:3px 10px;font-size:10px;line-height:1.6;text-align:center;white-space:normal;word-break:break-all;' +
         'pointer-events:auto;cursor:pointer;z-index:998;backdrop-filter:blur(2px);box-sizing:border-box;' +
         'transition:border-color .15s ease;}' +
         '#petStatBar:hover{border-color:rgba(120,132,255,.65);}' +
         // 聊天模式硬兜底：聊天窗口里信息条永不显示（JS 隐藏 + 类名双保险）
-        'body.chat-mode #petStatBar{display:none !important;}';
+        'body.chat-mode #petStatBar{display:none !important;}' +
+        // 陪伴模式：浮窗只负责陪伴，不显示 DSH 工作状态
+        'body.companion-mode #petStatBar{display:none !important;}';
     document.head.appendChild(dshBaseStyle);
     // 点击信息条：唤起 / 启动 DSH（主进程决定聚焦已有窗口或新开终端）
     const petStatBarEl = document.getElementById('petStatBar');
@@ -5464,6 +6813,17 @@ if (!isSettingsMode && window.electronAPI && window.electronAPI.on) {
         const t = dshLive.totals;
         const total = t.cacheHit + t.cacheMiss;
         return total > 0 ? ((t.cacheHit / total) * 100).toFixed(1) + '%' : '—';
+    }
+
+    // 状态栏用的紧凑余额文本（如 "¥12.34"）
+    function balanceCompactText() {
+        const b = dshLive.balance;
+        if (b && Array.isArray(b.balance_infos) && b.balance_infos.length) {
+            const i = b.balance_infos[0];
+            const cur = i.currency === 'CNY' ? '¥' : (i.currency ? i.currency + ' ' : '');
+            return cur + i.total_balance;
+        }
+        return '—';
     }
 
     // ---------- 非设置窗口：角落任务面板（可配置：高度 / 字号 / 显示内容 / 距贴图距离）----------
@@ -5533,52 +6893,59 @@ if (!isSettingsMode && window.electronAPI && window.electronAPI.on) {
             '<div style="opacity:.8;">距监控栏 ' + cfg.hoverGap + 'px · 上限 ' + hoverMaxH + 'px</div>' +
             '</div>';
     }
-    // 应用面板尺寸 / 字号 / 位置（CSS 变量 + max-height）
+    // 应用面板尺寸 / 字号 / 位置。
+    // 注意：不能用 CSS calc() —— 本版 Electron 解析 calc(100vh - var(...) - var(...))
+    // 会失败并把 max-height 算成 0，面板被压成一条线（表现为「弹出来也看不见」）。
+    // 所以这里全部在 JS 里算成像素值。
     function applyDshPanelStyle() {
         if (!panelEl) return;
         const cfg = dshPanelCfg();
-        // 面板上边缘随位置变化而变：max-height 精确到「窗口高 - 面板底边位置」，
-        // 保证拉到最高时上边缘恰好顶到窗口顶部，不会被窗口截断
-        const cap = 'calc(100vh - var(--float-pet-bottom,4px) - var(--float-pet-size,80px) - var(--dsh-panel-offset,16px))';
-        panelEl.style.maxHeight = cfg.height ? `min(${cfg.height}px, ${cap})` : cap;
+        const scale = scaleFactor();
+        const petBottom = cssNum('--float-pet-bottom', 72);   // 贴图脚底距窗口底边
+        const petSize = cssNum('--float-pet-size', 80);
+        const gap = Math.round(cfg.offset * scale);           // 面板与贴图头顶的间距
+        // 竖直堆叠：状态条 → 动作条 → 贴图 →（gap）→ 面板
+        const panelBottom = Math.round(petBottom + petSize + gap);
+        const cap = Math.max(120, Math.round(window.innerHeight - panelBottom - 6));
+        panelEl.style.bottom = panelBottom + 'px';
+        panelEl.style.maxHeight = (cfg.height ? Math.min(cfg.height, cap) : cap) + 'px';
         panelEl.style.setProperty('--dsh-panel-font', cfg.fontSize + 'px');
         panelEl.style.setProperty('--dsh-panel-offset', cfg.offset + 'px');
     }
-    // 面板显隐/位移：收起态隐藏；展开态不隐藏。鼠标靠近（四按钮气泡显示）时，
-    // 面板下移到「监控栏上方留 hoverGap」，并把高度上限压到「四按钮底边之下留 buttonGap」，
-    // 从数学上保证与四按钮、下方监控栏都不接触，且仍可交互；离开返回原位置。
+    // 跟随窗口宽度的缩放系数（面板示意图与真实尺寸共用同一套比例）
+    function scaleFactor() {
+        const w = window.innerWidth || 420;
+        return Math.max(0.6, Math.min(1.6, w / 420));
+    }
+    // 读一个数值型 CSS 变量
+    function cssNum(name, fallback) {
+        const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+        return Number.isFinite(v) ? v : fallback;
+    }
+    // 面板显隐：收起态隐藏；展开态按 applyDshPanelStyle 定位。
+    // 鼠标靠近不再改变位置（按钮已改到底部常驻动作条，上方没有需要让位的东西）。
     function applyPanelVisibility() {
         if (!panelEl) return;
+        const wasVisible = !panelEl.classList.contains('dsh-hide');
         panelEl.classList.toggle('dsh-hide', !panelOpen);
-        if (!taskPanelHovering) {
-            panelEl.style.bottom = '';
-            panelEl.style.maxHeight = '';
-            applyDshPanelStyle();
-            return;
-        }
-        const cfg = dshPanelCfg();
-        const rs = getComputedStyle(document.documentElement);
-        const petBottom = parseFloat(rs.getPropertyValue('--float-pet-bottom')) || 4;
-        const petSize = parseFloat(rs.getPropertyValue('--float-pet-size')) || 80;
-        const statH = parseFloat(rs.getPropertyValue('--pet-stat-h')) || 0; // 监控栏高+4（显示时才有值）
-        const barTop = statH + 2;                                  // 监控栏顶部距窗口底
-        const panelBottom = barTop + cfg.hoverGap;                 // 面板底边：监控栏上方留 hoverGap
-        const buttonBottom = petBottom + petSize + 6 + statH;      // 四按钮气泡底边
-        const maxH = Math.max(0, Math.round(buttonBottom - panelBottom - cfg.buttonGap));
-        panelEl.style.bottom = Math.round(panelBottom) + 'px';
-        panelEl.style.maxHeight = maxH + 'px';
+        panelEl.style.bottom = '';
+        panelEl.style.maxHeight = '';
+        applyDshPanelStyle();
+        // 面板显隐变化 → 窗口高度跟着变：
+        // 窗口下边缘贴底（主进程按高度差反向调整 y），所以高度收缩 = 上边缘下移。
+        if (wasVisible !== panelOpen && typeof updateWindowSize === 'function') updateWindowSize();
     }
     function ensurePanel() {
         if (panelEl || document.getElementById('dshTaskPanel')) return;
         const style = document.createElement('style');
         style.textContent =
-            '#dshTaskPanel{position:fixed;right:14px;bottom:calc(var(--float-pet-bottom,4px) + var(--float-pet-size,80px) + var(--dsh-panel-offset,16px));z-index:99999;width:300px;max-width:calc(100vw - 28px);' +
+            '#dshTaskPanel{position:fixed;right:14px;bottom:calc(var(--float-pet-bottom,72px) + var(--float-pet-size,80px) + 16px);z-index:99999;width:300px;max-width:calc(100vw - 28px);' +
             'background:rgba(30,34,48,.94);color:#e8eaf2;border:1px solid rgba(120,132,255,.35);border-radius:12px;' +
             'box-shadow:0 8px 30px rgba(0,0,0,.35);font-size:var(--dsh-panel-font,12px);line-height:1.7;overflow-y:auto;' +
             'scrollbar-width:none;' +
-            'backdrop-filter:blur(4px);transform-origin:bottom right;transition:transform .18s ease,opacity .18s ease,bottom .18s ease;}' +
+            'backdrop-filter:blur(4px);}' +
             '#dshTaskPanel::-webkit-scrollbar{display:none;}' +
-            '#dshTaskPanel.dsh-hide{transform:scale(.6);opacity:0;pointer-events:none;}' +
+            '#dshTaskPanel.dsh-hide{display:none;}' +
             '#dshTaskPanel .dsh-head{display:flex;align-items:center;gap:8px;padding:9px 11px;cursor:pointer;' +
             'background:linear-gradient(90deg,rgba(120,132,255,.16),transparent);}' +
             '#dshTaskPanel .dsh-dot{width:9px;height:9px;border-radius:50%;flex:none;}' +
@@ -5774,8 +7141,12 @@ if (!isSettingsMode && window.electronAPI && window.electronAPI.on) {
         }
 
         // 说话 + 切贴图（仅桌宠/聊天窗口；语音开关由 speakText 内部判断）
+        // 设置窗口不朗读：DSH 推送会广播到所有窗口，桌宠浮窗已经合成过一遍，
+        // 这里再合成会出现两路语音重叠（设置面板只需要更新监控面板显示）。
         // 任务完成时 TTS 只播报简短的完成语（随机挑选），不再念插件推送的长文案
-        if ((payload.event === 'task/done' || payload.event === 'test/done') && typeof speakText === 'function') {
+        if (isSettingsMode) {
+            // 设置窗口：只更新 UI，不合成任何 DSH 语音
+        } else if ((payload.event === 'task/done' || payload.event === 'test/done') && typeof speakText === 'function') {
             const DONE_PHRASES = ['任务完成！', '任务搞定啦！', '完成啦～', '搞定！', '任务完成～'];
             speakText(DONE_PHRASES[Math.floor(Math.random() * DONE_PHRASES.length)]);
         } else if (payload.say && typeof speakText === 'function') {
@@ -5802,22 +7173,27 @@ if (!isSettingsMode && window.electronAPI && window.electronAPI.on) {
     function dshShowMinds() {
         return !config || config.dshShowMinds !== false;
     }
-    // 设置信息条实际高度到 --pet-stat-h：显示时把贴图/按钮顶上去，隐藏时归零
+    // 把信息条实际高度写到 --pet-stat-h，并让窗口/贴图重新排布。
+    // 状态条显示时会把贴图与动作条整体顶上去 —— 贴图在屏幕上的绝对位置不变。
     function applyStatLift() {
         const bar = document.getElementById('petStatBar');
         const root = document.documentElement;
+        const apply = () => {
+            const h = (bar && bar.style.display !== 'none') ? (bar.offsetHeight || 0) : 0;
+            const prev = parseFloat(root.style.getPropertyValue('--pet-stat-h')) || 0;
+            root.style.setProperty('--pet-stat-h', h + 'px');
+            if (h !== prev && typeof updateWindowSize === 'function') updateWindowSize();
+        };
         if (!bar || bar.style.display === 'none') {
             root.style.setProperty('--pet-stat-h', '0px');
+            if (typeof updateWindowSize === 'function') updateWindowSize();
             return;
         }
-        requestAnimationFrame(() => {
-            const h = bar.offsetHeight || 0;
-            root.style.setProperty('--pet-stat-h', (h + 4) + 'px');
-        });
+        requestAnimationFrame(apply);
     }
     function renderStatBar() {
-        // 聊天模式：隐藏下方信息条（由聊天分支 JS + CSS 硬兜底共同保证）
-        if (isSettingsMode || isChatMode) {
+        // 聊天 / 陪伴模式：隐藏下方信息条（陪同时浮窗只作陪伴，不显示 DSH 工作状态）
+        if (isSettingsMode || isChatMode || isCompanionMode) {
             const bar = document.getElementById('petStatBar');
             if (bar && bar.style.display !== 'none') {
                 bar.style.display = 'none';
@@ -5831,10 +7207,10 @@ if (!isSettingsMode && window.electronAPI && window.electronAPI.on) {
         const parts = [];
         if (cfg.dsh) {
             const hitRate = hitRateText();
-            const cost = (dshLive.totals.cost || 0).toFixed(2);
             const conn = dshLive.pluginReachable ? '🟢' : '⚪';
             parts.push(conn + ' DSH ' + (dshLive.agentStatus === 'running' ? '运行中' : (dshLive.pluginReachable ? '空闲' : '未连')));
-            parts.push('缓存 ' + hitRate + ' · ¥' + cost);
+            // 显示余额而不是累计消费
+            parts.push('余额 ' + balanceCompactText() + ' · 缓存 ' + hitRate);
         }
         if (cfg.rate && statRate) parts.push(statRate.label);
         if (cfg.hardware && statHw) {
@@ -5887,7 +7263,7 @@ if (!isSettingsMode && window.electronAPI && window.electronAPI.on) {
             style.textContent =
                 '#dshAskModal{position:fixed;inset:0;z-index:999999;display:flex;align-items:center;justify-content:center;' +
                 'background:rgba(10,12,20,.45);backdrop-filter:blur(2px);}' +
-                '#dshAskBox{width:min(340px,86vw);background:#fff;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.3);' +
+                '#dshAskBox{width:min(340px,86vw);background:var(--surface);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.3);' +
                 'padding:18px;font:13px/1.7 system-ui,sans-serif;color:#222;max-height:70vh;overflow:auto;}' +
                 '#dshAskQ{font-weight:600;margin:0 0 14px;word-break:break-all;white-space:pre-wrap;}' +
                 '#dshAskBtns{display:flex;flex-wrap:wrap;gap:8px;}' +

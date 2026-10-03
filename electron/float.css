@@ -1,7 +1,209 @@
-* {
+﻿* {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
+}
+
+:root {
+    /* ===== 设计令牌：主色（由主题系统程序化写入） ===== */
+    --brand: #4B3FE3;
+    --brand-hover: #3C2ECA;
+    --brand-active: #3327A8;
+    --brand-soft: #F2F7FF;
+    --brand-soft-strong: #E5EAFF;
+    --brand-text: #1A1759;
+    --brand-on: #FFFFFF;
+
+    /* ===== 语义色 ===== */
+    --danger: #E8463A;
+    --danger-hover: #D93B2F;
+    --success: #16A34A;
+    --warn: #D97706;
+    --text: #171717;
+    --text-muted: #6B6B70;
+    --text-faint: #9A9AA6;
+
+    /* ===== 形状令牌（三档圆角） ===== */
+    --radius: 8px;
+    --radius-card: 12px;
+    --radius-full: 999px;
+
+    /* ===== 动效令牌 ===== */
+    --dur: 120ms;
+    --ease: cubic-bezier(.4, 0, .2, 1);
+    /* ===== 表面 / 背景令牌（跟随主题切换） ===== */
+    --surface: #FFFFFF;
+    --surface-rgb: 255, 255, 255;
+    --surface-muted: #F4F5F7;
+    --surface-muted-rgb: 244, 245, 247;
+    --surface-app: #F5F6FA;
+    --surface-app-rgb: 245, 246, 250;
+    --border: #E4E6ED;
+    --border-strong: #D3D6E0;
+
+    /* ===== 深度令牌（三档；由风格语言覆盖） ===== */
+    --shadow-1: 0 1px 2px rgba(16, 18, 40, .06);
+    --shadow-2: 0 4px 16px rgba(16, 18, 40, .10);
+    --shadow-3: 0 16px 48px rgba(16, 18, 40, .18);
+    --border-w: 1px;
+    --font-weight-title: 650;
+
+    /* ===== 材质令牌：窗口背景层 / 毛玻璃 =====
+       背景指的是「窗口内部的最底层」（.win-bg），不是电脑桌面。
+       backdrop-filter 只取 .win-bg 的颜色，桌面永远不参与。
+       三个不透明度分层：面板 > 卡片 > 标题栏，形成纵深。 */
+    --win-alpha: .92;
+    --card-alpha: .82;
+    --chrome-alpha: .66;
+    --panel-blur: 18px;
+    --panel-saturate: 180%;
+    --bg-blur: 0px;
+    --bg-sat: 100%;
+    --scrim: 0;
+    --win-bg: linear-gradient(160deg, #eef1f8, #dfe4f2);
+    --win-bg-image: none;
+
+    /* ===== 浮窗（桌宠模式）布局令牌：由 float.js 同步写入 ===== */
+    --pet-stat-h: 0px;
+    --pet-action-h: 0px;
+}
+
+/* ============================================================
+   深色：只翻中性令牌，品牌色（data-accent）完全不动
+   —— 所以「换主色」和「深浅」是两个正交维度，可以任意组合。
+   兼容 html[data-dark]、html[data-theme="dark"]、body.dark-mode 三种写法。
+   ============================================================ */
+:root[data-dark="1"],
+:root[data-theme="dark"],
+body.dark-mode {
+    --text: #EDEDF2;
+    --text-muted: #A2A2B2;
+    --text-faint: #75758C;
+    --surface: #1C1D25;
+    --surface-rgb: 28, 29, 37;
+    --surface-muted: #262834;
+    --surface-muted-rgb: 38, 40, 52;
+    --surface-app: #14151B;
+    --surface-app-rgb: 20, 21, 27;
+    --border: #34374B;
+    --border-strong: #454962;
+    --brand-on: #FFFFFF;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, .45);
+    --shadow-2: 0 6px 22px rgba(0, 0, 0, .50);
+    --shadow-3: 0 20px 56px rgba(0, 0, 0, .60);
+    /* 深色下默认窗口背景也变深，否则浅色渐变压不住白字 */
+    --win-bg: linear-gradient(160deg, #1d1f2b, #14151d);
+}
+
+/* ============================================================
+   风格语言（Fluent / Apple / Metro / Clay / Brutal）
+   只覆盖形状、描边、深度、字重、缓动 —— 不改任何布局与结构。
+   新增一种风格的成本 ≈ 10 行。
+   ============================================================ */
+
+/* Fluent（微软）：4px 网格、1px 描边压过阴影、快速响应曲线 */
+:root[data-style="fluent"] {
+    --radius: 4px;
+    --radius-card: 8px;
+    --border-w: 1px;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, .07);
+    --shadow-2: 0 2px 8px rgba(0, 0, 0, .10);
+    --shadow-3: 0 8px 28px rgba(0, 0, 0, .18);
+    --font-weight-title: 600;
+    --ease: cubic-bezier(.1, .9, .2, 1);
+}
+
+/* Apple：大圆角、0.5px 极淡描边、柔和扩散阴影、粗标题、慢半拍缓动 */
+:root[data-style="apple"] {
+    --radius: 10px;
+    --radius-card: 18px;
+    --border-w: .5px;
+    --shadow-1: 0 1px 3px rgba(10, 12, 30, .07);
+    --shadow-2: 0 8px 24px rgba(10, 12, 30, .10), 0 1px 2px rgba(10, 12, 30, .06);
+    --shadow-3: 0 26px 70px rgba(10, 12, 30, .22), 0 2px 6px rgba(10, 12, 30, .08);
+    --font-weight-title: 700;
+    --dur: 180ms;
+    --ease: cubic-bezier(.32, .72, 0, 1);
+}
+
+/* Metro（早期微软）：全直角、色块为主、几乎无阴影、瞬时响应 */
+:root[data-style="metro"] {
+    --radius: 0px;
+    --radius-card: 0px;
+    --radius-full: 0px;
+    --border-w: 1px;
+    --shadow-1: none;
+    --shadow-2: none;
+    --shadow-3: 0 0 0 1px rgba(0, 0, 0, .18);
+    --font-weight-title: 700;
+    --dur: 80ms;
+}
+
+/* Clay（新拟态）：超大圆角、双向阴影（左上白 / 右下暗）、无描边 */
+:root[data-style="clay"] {
+    --radius: 14px;
+    --radius-card: 26px;
+    --border-w: 0px;
+    --shadow-1: 0 2px 4px rgba(16, 18, 40, .08);
+    --shadow-2: 6px 6px 18px rgba(16, 18, 40, .13), -6px -6px 18px rgba(255, 255, 255, .75);
+    --shadow-3: 14px 14px 40px rgba(16, 18, 40, .20);
+    --font-weight-title: 800;
+    --dur: 200ms;
+}
+
+:root[data-style="clay"][data-dark="1"],
+:root[data-style="clay"][data-theme="dark"] {
+    --shadow-2: 6px 6px 20px rgba(0, 0, 0, .50), -4px -4px 16px rgba(255, 255, 255, .04);
+    --shadow-3: 16px 16px 46px rgba(0, 0, 0, .60);
+}
+
+/* Brutal（新粗野）：2px 硬描边、无模糊的偏移硬影、按下时整体位移 */
+:root[data-style="brutal"] {
+    --radius: 0px;
+    --radius-card: 0px;
+    --border-w: 2px;
+    --border: #17171A;
+    --border-strong: #17171A;
+    --shadow-1: 2px 2px 0 #17171A;
+    --shadow-2: 4px 4px 0 #17171A;
+    --shadow-3: 8px 8px 0 #17171A;
+    --font-weight-title: 800;
+    --dur: 60ms;
+    --ease: linear;
+}
+
+:root[data-style="brutal"][data-dark="1"],
+:root[data-style="brutal"][data-theme="dark"] {
+    --border: #EDEDF2;
+    --border-strong: #EDEDF2;
+    --shadow-1: 2px 2px 0 #EDEDF2;
+    --shadow-2: 4px 4px 0 #EDEDF2;
+    --shadow-3: 8px 8px 0 #EDEDF2;
+}
+
+/* 毛玻璃总开关：关掉后所有面板回落为不透明实色 */
+:root[data-glass="0"] {
+    --win-alpha: 1;
+    --card-alpha: 1;
+    --chrome-alpha: 1;
+    --panel-blur: 0px;
+}
+
+/* 切换主题时让面板平滑过渡（不影响贴图/粒子动画，它们各自有 animation） */
+.float-container,
+.float-bubble,
+.chat-illust-panel,
+.chat-main,
+.chat-header,
+.chat-log,
+.chat-input-area,
+.pet-stat-bar,
+.pet-action-bar,
+.settings-panel,
+.settings-box,
+.sb-body {
+    transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease),
+                color var(--dur) var(--ease);
 }
 
 body {
@@ -12,6 +214,202 @@ body {
     height: 100vh;
     -webkit-user-select: text;
     user-select: text;
+}
+
+/* ============================================================
+   窗口背景层（.win-bg）与毛玻璃材质
+   ------------------------------------------------------------
+   背景 = 窗口内部的最底层。UI 层（.float-container / .chat-container /
+   .settings-panel）用 backdrop-filter 取它的颜色并虚化，
+   所以毛玻璃的作用范围严格限制在窗口内 —— 桌面永远不参与。
+   一致性要求：
+     1) .win-bg 与 UI 层必须是同一父元素的兄弟节点（同一层叠上下文）；
+     2) UI 层的祖先链上不能出现 transform / filter / will-change /
+        opacity < 1，否则 backdrop-filter 会取到错误的参照系。
+   三者都满足：float.html 里 .win-bg 与三个模式容器同级，且
+   body 上没有任何 transform / filter。
+   ============================================================ */
+.win-bg {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity var(--dur) var(--ease);
+    background: var(--win-bg);
+    /* 背景自身的虚化与饱和度（与「毛玻璃模糊」是两个独立层次） */
+    filter: blur(var(--bg-blur)) saturate(var(--bg-sat));
+}
+
+/* 图片背景（由设置面板写入 --win-bg-image） */
+.win-bg::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: var(--win-bg-image);
+    background-size: cover;
+    background-position: center;
+    opacity: 0;
+}
+
+:root[data-bg="image"] .win-bg::before {
+    opacity: 1;
+}
+
+.win-bg::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: var(--scrim);
+    background: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, .25) 55%, #000 100%);
+}
+
+/* ============================================================
+   材质工具类
+   ============================================================ */
+/* 桌宠模式：浮窗保持完全透明，只有贴图、按钮条和状态条 */
+body:not(.chat-mode):not(.settings-mode):not(.companion-mode) .win-bg {
+    opacity: 0;
+}
+
+body.chat-mode .win-bg,
+body.settings-mode .win-bg,
+body.companion-mode .win-bg {
+    opacity: 1;
+}
+
+/* ============================================================
+   材质工具类
+   ============================================================ */
+.surface {
+    background: rgba(var(--surface-rgb), var(--win-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+}
+
+.surface-card {
+    background: rgba(var(--surface-rgb), var(--card-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+}
+
+.surface-chrome {
+    background: rgba(var(--surface-muted-rgb), var(--chrome-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+}
+
+/* ============================================================
+   桌宠模式：贴图下方的固定动作条（四个按钮：聊天 / 设置 / 回家 / 陪伴）
+   ------------------------------------------------------------
+   .float-bubble 保留（设置可关），同一套 .bubble-option 也能作为常驻按钮条，
+   两者的 data-action 点击逻辑一致。
+   float.js 通过 --pet-action-h 把贴图与状态条整体上移，两者互不遮挡。
+   ============================================================ */
+.pet-action-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 0;
+    transform: translateX(-50%);
+    z-index: 990;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    height: 33px;
+    padding: 0 8px;
+    box-sizing: border-box;
+    pointer-events: auto;
+    background: transparent;
+    border: 0;
+    opacity: 0;
+    transition: opacity var(--dur) var(--ease);
+}
+
+body:not(.chat-mode):not(.settings-mode):not(.companion-mode) .pet-action-bar {
+    opacity: 1;
+}
+
+body.chat-mode .pet-action-bar,
+body.settings-mode .pet-action-bar,
+body.companion-mode .pet-action-bar {
+    display: none !important;
+}
+
+.pab-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 27px;
+    min-width: 30px;
+    padding: 0 5px;
+    border: var(--border-w) solid var(--border);
+    border-radius: calc(var(--radius) + 2px);
+    background: rgba(var(--surface-rgb), var(--card-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    box-shadow: var(--shadow-1);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease),
+                transform var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.pab-item:hover {
+    background: var(--brand-soft);
+    border-color: var(--brand);
+    color: var(--brand-hover);
+    transform: translateY(-2px);
+}
+
+.pab-item:active {
+    transform: translateY(0) scale(.94);
+}
+
+.pab-item .pab-label {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .2px;
+}
+
+/* hover 出中文标签：解决「猜 emoji」问题 */
+.pab-item .pab-tip {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%) translateY(2px);
+    padding: 3px 8px;
+    border-radius: calc(var(--radius) + 1px);
+    background: rgba(20, 22, 32, .92);
+    color: #fff;
+    font-size: 10.5px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+
+.pab-item:hover .pab-tip {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+.pab-item.primary {
+    background: var(--brand);
+    border-color: var(--brand);
+    color: var(--brand-on);
+}
+
+.pab-item.primary:hover {
+    background: var(--brand-hover);
+    border-color: var(--brand-hover);
+    color: var(--brand-on);
 }
 
 /* ===== 桌宠模式 ===== */
@@ -28,7 +426,7 @@ body {
 
 .float-pet {
     position: absolute;
-    bottom: calc(var(--float-pet-bottom, calc(8% + var(--float-pet-size, 80px))) + var(--pet-stat-h, 0px));
+    bottom: calc(var(--float-pet-bottom, calc(8% + var(--float-pet-size, 80px))) + var(--pet-action-h, 0px) + var(--pet-stat-h, 0px));
     left: 50%;
     transform: translateX(-50%);
     width: var(--float-pet-size, 80px);
@@ -267,19 +665,22 @@ body {
     }
 }
 
-/* ===== 对话气泡（默认隐藏，鼠标靠近时显示）===== */
+/* ===== 对话气泡（默认隐藏，鼠标靠近时显示；也可作为设置里的按钮条）===== */
 .float-bubble {
     position: absolute;
-    bottom: calc(var(--float-pet-bottom, 4px) + var(--float-pet-size, 80px) + 6px + var(--float-bubble-offset, 0px) + var(--pet-stat-h, 0px));
+    bottom: calc(var(--float-pet-bottom, 4px) + var(--float-pet-size, 80px) + 6px + var(--float-bubble-offset, 0px) + var(--pet-action-h, 0px) + var(--pet-stat-h, 0px));
     left: 50%;
     transform: translateX(-50%);
-    background: rgba(255, 255, 255, 0.95);
-    border-radius: 12px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+    background: rgba(var(--surface-rgb), calc(var(--card-alpha) + .14));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    border: var(--border-w) solid var(--border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-2);
     cursor: pointer;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     font-size: 12px;
-    color: #333;
+    color: var(--text);
     transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.3s ease;
     width: 200px; /* 与 updateWindowSize 中 bubbleWidth 保持一致 */
     line-height: 1.4;
@@ -320,22 +721,32 @@ body {
 
 /* 气泡选项按钮（2×2 网格中的单元格） */
 .bubble-option {
-    padding: 9px 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 8px 6px;
     font-size: 12px;
     cursor: pointer;
-    transition: background 0.2s ease;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease),
+                border-color var(--dur) var(--ease);
     white-space: nowrap;
     text-align: center;
     line-height: 1.4;
-    border-radius: 8px;
+    border: var(--border-w) solid var(--border);
+    border-radius: var(--radius);
+    background: rgba(var(--surface-rgb), .55);
+    color: var(--text);
 }
 
 .bubble-option:hover {
-    background: rgba(102, 126, 234, 0.08);
+    background: var(--brand-soft);
+    border-color: var(--brand);
+    color: var(--brand-hover);
 }
 
 .bubble-option:active {
-    background: rgba(102, 126, 234, 0.15);
+    background: var(--brand-soft-strong);
 }
 
 /* 气泡小尾巴 */
@@ -347,7 +758,43 @@ body {
     transform: translateX(-50%);
     border-left: 6px solid transparent;
     border-right: 6px solid transparent;
-    border-top: 8px solid rgba(255, 255, 255, 0.95);
+    border-top: 8px solid rgba(var(--surface-rgb), calc(var(--card-alpha) + .14));
+}
+
+/* ===== 贴图下方状态条（DSH 连接 / 硬件监控 / 峰谷时段）=====
+   由 float.js 填充内容；此处覆盖脚本注入的基础样式，
+   改为窗口内材质（毛玻璃 + 令牌色），并让位给底部动作条。 */
+.pet-stat-bar {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: var(--pet-action-h, 36px);
+    z-index: 995;
+    width: max-content;
+    max-width: calc(100vw - 16px);
+    padding: 3px 10px;
+    box-sizing: border-box;
+    background: rgba(var(--surface-rgb), var(--card-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    border: var(--border-w) solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-1);
+    color: var(--text);
+    font-size: 10px;
+    line-height: 1.6;
+    text-align: center;
+    white-space: normal;
+    word-break: break-all;
+    cursor: pointer;
+    pointer-events: auto;
+    transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.pet-stat-bar:hover {
+    border-color: var(--brand);
+    background: var(--brand-soft);
+    color: var(--brand-hover);
 }
 
 /* ===== 浮窗设置按钮 ===== */
@@ -388,17 +835,20 @@ body {
     left: 0;
     width: 100%;
     height: 100%;
-    background: transparent;   /* 窗口透明，左侧立绘栏可直接看到桌面 */
+    background: transparent;   /* 窗口背景由 .win-bg 提供，这里保持透明 */
     border-radius: 0;       /* 无边框标题栏不需要圆角 */
     display: flex;
     flex-direction: row;
     overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    z-index: 1;             /* 位于窗口背景层之上，backdrop-filter 才能取到它 */
 }
 
-/* 聊天主区使用不透明背景，保证文字可读（立绘栏保持透明） */
+/* 聊天主区：毛玻璃面板，透出窗口背景（不是桌面） */
 .chat-main {
-    background: #fff;
+    background: rgba(var(--surface-rgb), var(--win-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
 }
 
 /* 自定义标题栏作为拖动区域（聊天窗口为无边框透明窗口） */
@@ -414,7 +864,11 @@ body {
     width: var(--illust-width, 30%);
     min-width: 80px;
     max-width: 70%;
-    background: transparent; /* 立绘栏背景设为透明 */
+    /* 立绘栏与外层同一块窗口背景：这里的毛玻璃取 .win-bg，
+       所以立绘依旧「浮」在窗口背景上，只是不再透出桌面。 */
+    background: rgba(var(--surface-rgb), calc(var(--win-alpha) - .06));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -429,15 +883,17 @@ body {
 .chat-illust-divider {
     width: 5px;
     cursor: col-resize;
-    background: #eee;
+    background: rgba(var(--surface-muted-rgb), var(--chrome-alpha));
+    border-left: var(--border-w) solid var(--border);
+    border-right: var(--border-w) solid var(--border);
     flex-shrink: 0;
     user-select: none;
-    transition: background 0.2s;
+    transition: background var(--dur) var(--ease);
     z-index: 20;
 }
 .chat-illust-divider:hover,
 .chat-illust-divider.active {
-    background: #667eea;
+    background: var(--brand);
 }
 
 .chat-illust-panel.hidden {
@@ -478,8 +934,8 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(255,255,255,0.5);
-    border-radius: 8px;
+    background: rgba(var(--surface-rgb), .5);
+    border-radius: var(--radius-card);
 }
 
 .chat-illust-panel .illust-shape {
@@ -495,18 +951,22 @@ body {
     right: 0;
     top: 50%;
     transform: translateY(-50%);
-    background: rgba(255,255,255,0.8);
-    border: none;
-    border-radius: 0 6px 6px 0;
+    background: rgba(var(--surface-rgb), var(--card-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur));
+    backdrop-filter: blur(var(--panel-blur));
+    border: var(--border-w) solid var(--border);
+    border-right: none;
+    border-radius: var(--radius) 0 0 var(--radius);
     padding: 6px 4px;
     font-size: 14px;
-    color: #666;
+    color: var(--text-muted);
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
 .illust-hide-btn:hover {
-    background: rgba(255,255,255,1);
+    background: var(--brand-soft);
+    color: var(--brand-hover);
 }
 
 .chat-main {
@@ -522,16 +982,20 @@ body {
     justify-content: space-between;
     align-items: center;
     padding: 12px 16px;
-    background: linear-gradient(135deg, #667eea, #764ba2);
-    color: white;
+    /* 标题栏用最透的一档，形成「面板 > 卡片 > 标题栏」的纵深 */
+    background: rgba(var(--surface-muted-rgb), var(--chrome-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    border-bottom: var(--border-w) solid var(--border);
+    color: var(--text);
     font-size: 14px;
-    font-weight: 600;
+    font-weight: var(--font-weight-title);
     flex-shrink: 0;
     gap: 10px;
 }
 
 .illust-show-btn {
-    background: rgba(102, 126, 234, 0.8);
+    background: color-mix(in srgb, var(--brand) 80%, transparent);
     border: none;
     border-radius: 6px;
     padding: 4px 6px;
@@ -557,29 +1021,33 @@ body {
 .chat-close-btn {
     background: none;
     border: none;
-    color: white;
+    color: var(--text-muted);
     font-size: 18px;
     cursor: pointer;
     padding: 2px 6px;
     line-height: 1;
+    border-radius: var(--radius);
 }
 
 .chat-close-btn:hover {
-    opacity: 0.8;
+    background: rgba(var(--surface-rgb), .5);
+    color: var(--text);
 }
 
 .chat-settings-btn {
     background: none;
     border: none;
-    color: white;
+    color: var(--text-muted);
     font-size: 16px;
     cursor: pointer;
     padding: 2px 6px;
     line-height: 1;
+    border-radius: var(--radius);
 }
 
 .chat-settings-btn:hover {
-    opacity: 0.8;
+    background: rgba(var(--surface-rgb), .5);
+    color: var(--text);
 }
 
 .chat-log {
@@ -590,7 +1058,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    background: #f5f5f5;
+    background: transparent;
     box-sizing: border-box;
     -webkit-user-select: text;
     user-select: text;
@@ -618,21 +1086,26 @@ body {
 
 .chat-message.user {
     align-self: flex-end;
-    background: linear-gradient(135deg, #95ec69, #06ad56);
-    color: #1f1f1f;
+    background: linear-gradient(135deg, var(--brand), var(--brand-hover));
+    color: var(--brand-on);
+    border: var(--border-w) solid transparent;
     border-bottom-right-radius: 4px;
 }
 
 .chat-message.from-pet {
     align-self: flex-start;
-    background: linear-gradient(135deg, #e3f2fd, #bbdefb);
-    color: #1f1f1f;
+    background: rgba(var(--surface-rgb), calc(var(--card-alpha) + .12));
+    -webkit-backdrop-filter: blur(calc(var(--panel-blur) * .6)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(calc(var(--panel-blur) * .6)) saturate(var(--panel-saturate));
+    border: var(--border-w) solid var(--border);
+    color: var(--text);
     border-bottom-left-radius: 4px;
 }
 
 .chat-message.from-pet.agent-mode {
-    background: linear-gradient(135deg, #e0e0e0, #cecece);
-    color: #555;
+    background: rgba(var(--surface-muted-rgb), var(--card-alpha));
+    color: var(--text-muted);
+    border-color: var(--border);
 }
 
 .chat-message code {
@@ -656,8 +1129,10 @@ body {
     display: flex;
     gap: 8px;
     padding: 10px 12px;
-    border-top: 1px solid #eee;
-    background: white;
+    border-top: var(--border-w) solid var(--border);
+    background: rgba(var(--surface-muted-rgb), var(--chrome-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
     flex-shrink: 0;
 }
 
@@ -666,29 +1141,33 @@ body {
     width: 100%;
     min-width: 0;
     padding: 8px 14px;
-    border: 1px solid #e0e0e0;
-    border-radius: 18px;
+    border: var(--border-w) solid var(--border-strong);
+    border-radius: var(--radius-full);
+    background: rgba(var(--surface-rgb), .72);
+    color: var(--text);
     font-size: 14px;
     outline: none;
 }
 
 .chat-input-area input:focus {
-    border-color: #667eea;
+    border-color: var(--brand);
 }
 
 .float-send-btn {
     padding: 8px 16px;
-    background: linear-gradient(135deg, #667eea, #764ba2);
-    color: white;
-    border: none;
-    border-radius: 18px;
+    background: var(--brand);
+    color: var(--brand-on);
+    border: var(--border-w) solid var(--brand);
+    border-radius: var(--radius-full);
     font-size: 14px;
+    font-weight: 600;
     cursor: pointer;
     flex-shrink: 0;
 }
 
 .float-send-btn:hover {
-    opacity: 0.9;
+    background: var(--brand-hover);
+    border-color: var(--brand-hover);
 }
 
 .float-send-btn:active {
@@ -699,9 +1178,9 @@ body {
 .tool-result-container {
     margin: 8px 0;
     padding: 6px 10px;
-    background: #f8f9fa;
+    background: var(--surface-muted);
     border-radius: 8px;
-    border-left: 3px solid #667eea;
+    border-left: 3px solid var(--brand);
     width: 100%;
     flex-shrink: 0;
     box-sizing: border-box;
@@ -720,11 +1199,11 @@ body {
 }
 
 .tool-result-container details summary::-webkit-details-marker {
-    color: #667eea;
+    color: var(--brand);
 }
 
 .tool-result-container details pre {
-    background: #fff;
+    background: var(--surface);
     padding: 8px;
     border-radius: 4px;
     overflow-x: auto;
@@ -739,7 +1218,7 @@ body {
 
 .voice-test-btn {
     padding: 8px 12px;
-    background: #f0f0f0;
+    background: var(--surface-muted);
     border: none;
     border-radius: 18px;
     font-size: 16px;
@@ -749,7 +1228,7 @@ body {
     flex-shrink: 0;
 }
 .voice-test-btn:hover {
-    background: #e0e0e0;
+    background: var(--surface-muted);
     transform: scale(1.05);
 }
 .voice-test-btn:active {
@@ -767,17 +1246,18 @@ body {
 
 .save-chat-btn {
     padding: 8px 12px;
-    background: #f0f0f0;
-    border: none;
-    border-radius: 18px;
+    background: rgba(var(--surface-rgb), .72);
+    border: var(--border-w) solid var(--border);
+    border-radius: var(--radius-full);
+    color: var(--text);
     font-size: 13px;
     cursor: pointer;
-    transition: background 0.2s;
-    margin-left: 8px;
+    transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
     flex-shrink: 0;
 }
 .save-chat-btn:hover {
-    background: #e0e0e0;
+    background: var(--brand-soft);
+    border-color: var(--brand);
 }
 .save-chat-btn:active {
     transform: scale(0.95);
@@ -786,7 +1266,7 @@ body {
 /* ===== Agent 思考过程折叠容器 ===== */
 .agent-thinking {
     margin: 6px 0;
-    background: #f5f5f5;
+    background: var(--surface-muted);
     border-radius: 8px;
     padding: 6px 10px;
     border: 1px solid #e0e0e0;
@@ -812,7 +1292,7 @@ body {
     margin: 4px 0;
     padding: 6px 10px;
     font-size: 13px;
-    background: #e8e8e8;
+    background: var(--surface-muted);
     border-radius: 6px;
     color: #555;
 }
@@ -825,8 +1305,11 @@ body {
     gap: 6px;
     padding: 10px 16px;
     margin: 4px auto 8px;
-    background: rgba(255,255,255,0.8);
-    border-radius: 20px;
+    background: rgba(var(--surface-rgb), var(--card-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    border: var(--border-w) solid var(--border);
+    border-radius: var(--radius-full);
     max-width: 200px;
     flex-shrink: 0;
 }
@@ -834,14 +1317,14 @@ body {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #667eea;
+    background: var(--brand);
     animation: loadingBounce 1.4s ease-in-out infinite;
 }
 .loading-dot:nth-child(2) { animation-delay: 0.2s; }
 .loading-dot:nth-child(3) { animation-delay: 0.4s; }
 .loading-text {
     font-size: 13px;
-    color: #667eea;
+    color: var(--brand);
     margin-left: 4px;
 }
 @keyframes loadingBounce {
@@ -867,7 +1350,7 @@ body {
 .image-placeholder {
     width: 180px;
     height: 180px;
-    background: #e0e0e0;
+    background: var(--surface-muted);
     border-radius: 8px;
     display: flex;
     flex-direction: column;
@@ -881,7 +1364,7 @@ body {
     width: 32px;
     height: 32px;
     border: 3px solid #ccc;
-    border-top: 3px solid #667eea;
+    border-top: 3px solid var(--brand);
     border-radius: 50%;
     animation: placeholderSpin 0.8s linear infinite;
 }
@@ -910,7 +1393,9 @@ body {
     left: 0;
     width: 100%;
     height: 100%;
-    background: white;
+    /* 透明承载层：真正的窗口背景在上层的 .win-bg。
+       若这里画实色，backdrop-filter 会以它为参照，毛玻璃就取不到背景图了。 */
+    background: transparent;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -918,12 +1403,24 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+/* 一体式设置面板：单个毛玻璃面板直接取 .win-bg 的颜色，
+   避免「面板套面板」导致 backdrop 参照被内层遮挡。 */
+#settingsPanel > .settings-box {
+    background: rgba(var(--surface-rgb), var(--win-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    border: var(--border-w) solid var(--border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-3);
+    overflow: hidden;
+}
+
 .settings-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 12px 16px;
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    background: linear-gradient(135deg, var(--brand), var(--brand-hover));
     color: white;
     font-size: 14px;
     font-weight: 600;
@@ -1010,13 +1507,13 @@ body {
     width: 16px;
     left: 2px;
     bottom: 2px;
-    background-color: white;
+    background-color: var(--surface);
     transition: 0.3s;
     border-radius: 50%;
 }
 
 input:checked + .slider {
-    background-color: #667eea;
+    background-color: var(--brand);
 }
 
 input:checked + .slider:before {
@@ -1030,7 +1527,7 @@ input:checked + .slider:before {
     border-radius: 6px;
     border: 1px solid #ddd;
     font-size: 13px;
-    background: white;
+    background: var(--surface);
     max-height: 200px;
     outline: none;
     transition: border-color 0.2s;
@@ -1039,7 +1536,7 @@ input:checked + .slider:before {
 }
 
 #voiceSelect:focus {
-    border-color: #667eea;
+    border-color: var(--brand);
 }
 
 .voice-hint {
@@ -1061,7 +1558,7 @@ input:checked + .slider:before {
     padding: 6px 16px;
     border: none;
     border-radius: 6px;
-    background: #667eea;
+    background: var(--brand);
     color: white;
     cursor: pointer;
     font-size: 12px;
@@ -1070,7 +1567,7 @@ input:checked + .slider:before {
 }
 
 .voice-preview-btn:hover {
-    background: #5a6fd6;
+    background: var(--brand-active);
 }
 
 .voice-preview-btn:active {
@@ -1090,4 +1587,1065 @@ body.settings-mode textarea,
 body.settings-mode button {
     -webkit-app-region: no-drag;
 }
+
+/* ============================================================
+   统一交互反馈（覆盖全站按钮）
+   四态：默认 / 悬停 / 按下 / 禁用；并补回键盘焦点环。
+   仅改变视觉反馈，不影响任何点击事件逻辑。
+   ============================================================ */
+button:not(:disabled) {
+    transition: transform var(--dur) ease, filter var(--dur) ease,
+                background var(--dur) ease, border-color var(--dur) ease,
+                color var(--dur) ease, opacity var(--dur) ease;
+}
+
+button:hover:not(:disabled) {
+    filter: brightness(0.95);
+}
+
+button:active:not(:disabled) {
+    transform: scale(0.96);
+    filter: brightness(0.9);
+}
+
+button:disabled {
+    cursor: not-allowed;
+    filter: grayscale(1);
+    opacity: 0.5;
+    transform: none;
+}
+
+button:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    button:not(:disabled) {
+        transition: none;
+    }
+}
+
+/* ============================================================
+   主题配色（程序化切换：JS 只需设置 <html data-accent="...">）
+   不设 data-theme 时使用 :root 中的默认紫。新增主题 = 复制一段。
+   ============================================================ */
+:root[data-accent="blue"] {
+    --brand: #2563EB; --brand-hover: #1D4ED8; --brand-active: #1B41B8;
+    --brand-soft: #EFF6FF; --brand-soft-strong: #DBEAFE; --brand-text: #1E3A8A;
+    --surface-app: #F2F6FE; --surface-app-rgb: 242, 246, 254;
+    --surface-muted: #EFF4FB; --surface-muted-rgb: 239, 244, 251;
+}
+:root[data-accent="teal"] {
+    --brand: #0D9488; --brand-hover: #0F766E; --brand-active: #0E655E;
+    --brand-soft: #ECFDF9; --brand-soft-strong: #CCFBF1; --brand-text: #134E4A;
+    --surface-app: #F0FAF8; --surface-app-rgb: 240, 250, 248;
+    --surface-muted: #ECF7F5; --surface-muted-rgb: 236, 247, 245;
+}
+:root[data-accent="green"] {
+    --brand: #16A34A; --brand-hover: #15803D; --brand-active: #136F35;
+    --brand-soft: #F0FDF4; --brand-soft-strong: #DCFCE7; --brand-text: #14532D;
+    --surface-app: #F2FBF4; --surface-app-rgb: 242, 251, 244;
+    --surface-muted: #EDF8F0; --surface-muted-rgb: 237, 248, 240;
+}
+:root[data-accent="pink"] {
+    --brand: #DB2777; --brand-hover: #BE185D; --brand-active: #A61553;
+    --brand-soft: #FDF2F8; --brand-soft-strong: #FCE7F3; --brand-text: #831843;
+    --surface-app: #FDF4F8; --surface-app-rgb: 253, 244, 248;
+    --surface-muted: #FBEEF3; --surface-muted-rgb: 251, 238, 243;
+}
+
+/* ==== UI-REDESIGN-INJECT-START ==== */
+/* 以下内容由 scripts/sync-inline.mjs 从 css/float-ui-additions.css 注入。
+   请修改源文件后重新运行脚本，不要直接改这一段。 */
+/* ============================================================
+   UI 重做增量样式（窗口背景 / 毛玻璃 / 风格语言 / 浮窗动作条）
+   ------------------------------------------------------------
+   本块由 scripts/inline-float-css.mjs 注入，请勿手工在 float.css 与
+   float.html 的内联 style 里分别修改 —— 只改这个文件，然后运行：
+       node scripts/inline-float-css.mjs
+   ------------------------------------------------------------
+   设计约定：
+   1) 「背景」指窗口内部的最底层（.win-bg），不是电脑桌面；
+      毛玻璃（backdrop-filter）取的是 .win-bg 的颜色，桌面永不参与。
+   2) 风格语言只覆盖形状/描边/深度/字重/缓动令牌，不改布局与结构。
+      新增一种风格 ≈ 10 行。
+   3) 选择器优先使用 body.<mode> 前缀提高特异性，确保能覆盖
+      float.html 内联块中的旧规则，而不依赖声明顺序。
+   ============================================================ */
+
+/* ---------- 1. 令牌补齐（新 token；同名者以本块为准） ---------- */
+:root {
+    --text-faint: #9A9AA6;
+    --success: #16A34A;
+    --warn: #D97706;
+    --ease: cubic-bezier(.4, 0, .2, 1);
+    --border: #E4E6ED;
+    --border-strong: #D3D6E0;
+
+    /* 深度令牌（三档，由风格语言覆盖） */
+    --shadow-1: 0 1px 2px rgba(16, 18, 40, .06);
+    --shadow-2: 0 4px 16px rgba(16, 18, 40, .10);
+    --shadow-3: 0 16px 48px rgba(16, 18, 40, .18);
+    --border-w: 1px;
+    --font-weight-title: 650;
+
+    /* 材质令牌：背景层 + 毛玻璃 + 背景自身虚化 */
+    --win-alpha: .92;
+    --card-alpha: .82;
+    --chrome-alpha: .66;
+    --panel-blur: 18px;
+    --panel-saturate: 180%;
+    --bg-blur: 0px;
+    --bg-sat: 100%;
+    --scrim: 0;
+    --win-bg: linear-gradient(160deg, #eef1f8, #dfe4f2);
+    --win-bg-image: none;
+
+    /* 浮窗（桌宠模式）布局：由 float.js 同步写入 --pet-action-h */
+    --pet-stat-h: 0px;
+    --pet-action-h: 36px;
+}
+
+/* ---------- 2. 深色：只翻中性令牌，品牌色（data-accent）不动 ---------- */
+:root[data-dark="1"],
+:root[data-theme="dark"],
+body.dark-mode {
+    --text: #EDEDF2;
+    --text-muted: #A2A2B2;
+    --text-faint: #75758C;
+    --surface: #1C1D25;
+    --surface-rgb: 28, 29, 37;
+    --surface-muted: #262834;
+    --surface-muted-rgb: 38, 40, 52;
+    --surface-app: #14151B;
+    --surface-app-rgb: 20, 21, 27;
+    --border: #34374B;
+    --border-strong: #454962;
+    --brand-on: #FFFFFF;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, .45);
+    --shadow-2: 0 6px 22px rgba(0, 0, 0, .50);
+    --shadow-3: 0 20px 56px rgba(0, 0, 0, .60);
+    --win-bg: linear-gradient(160deg, #1d1f2b, #14151d);
+}
+
+/* ---------- 3. 风格语言：Fluent / Apple / Metro / Clay / Brutal ---------- */
+
+/* Fluent（微软）：4px 网格、1px 描边压过阴影、快速响应曲线 */
+:root[data-style="fluent"] {
+    --radius: 4px;
+    --radius-card: 8px;
+    --border-w: 1px;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, .07);
+    --shadow-2: 0 2px 8px rgba(0, 0, 0, .10);
+    --shadow-3: 0 8px 28px rgba(0, 0, 0, .18);
+    --font-weight-title: 600;
+    --ease: cubic-bezier(.1, .9, .2, 1);
+}
+
+/* Apple：大圆角、0.5px 极淡描边、柔和扩散阴影、慢半拍缓动 */
+:root[data-style="apple"] {
+    --radius: 10px;
+    --radius-card: 18px;
+    --border-w: .5px;
+    --shadow-1: 0 1px 3px rgba(10, 12, 30, .07);
+    --shadow-2: 0 8px 24px rgba(10, 12, 30, .10), 0 1px 2px rgba(10, 12, 30, .06);
+    --shadow-3: 0 26px 70px rgba(10, 12, 30, .22), 0 2px 6px rgba(10, 12, 30, .08);
+    --font-weight-title: 700;
+    --dur: 180ms;
+    --ease: cubic-bezier(.32, .72, 0, 1);
+}
+
+/* Metro（早期微软）：全直角、色块为主、几乎无阴影、瞬时响应 */
+:root[data-style="metro"] {
+    --radius: 0px;
+    --radius-card: 0px;
+    --radius-full: 0px;
+    --border-w: 1px;
+    --shadow-1: none;
+    --shadow-2: none;
+    --shadow-3: 0 0 0 1px rgba(0, 0, 0, .18);
+    --font-weight-title: 700;
+    --dur: 80ms;
+}
+
+/* Clay（新拟态）：超大圆角、双向阴影（左上白 / 右下暗）、无描边 */
+:root[data-style="clay"] {
+    --radius: 14px;
+    --radius-card: 26px;
+    --border-w: 0px;
+    --shadow-1: 0 2px 4px rgba(16, 18, 40, .08);
+    --shadow-2: 6px 6px 18px rgba(16, 18, 40, .13), -6px -6px 18px rgba(255, 255, 255, .75);
+    --shadow-3: 14px 14px 40px rgba(16, 18, 40, .20);
+    --font-weight-title: 800;
+    --dur: 200ms;
+}
+
+:root[data-style="clay"][data-dark="1"],
+:root[data-style="clay"][data-theme="dark"] {
+    --shadow-2: 6px 6px 20px rgba(0, 0, 0, .50), -4px -4px 16px rgba(255, 255, 255, .04);
+    --shadow-3: 16px 16px 46px rgba(0, 0, 0, .60);
+}
+
+/* Brutal（新粗野）：2px 硬描边、无模糊的偏移硬影、按下时整体位移 */
+:root[data-style="brutal"] {
+    --radius: 0px;
+    --radius-card: 0px;
+    --border-w: 2px;
+    --border: #17171A;
+    --border-strong: #17171A;
+    --shadow-1: 2px 2px 0 #17171A;
+    --shadow-2: 4px 4px 0 #17171A;
+    --shadow-3: 8px 8px 0 #17171A;
+    --font-weight-title: 800;
+    --dur: 60ms;
+    --ease: linear;
+}
+
+:root[data-style="brutal"][data-dark="1"],
+:root[data-style="brutal"][data-theme="dark"] {
+    --border: #EDEDF2;
+    --border-strong: #EDEDF2;
+    --shadow-1: 2px 2px 0 #EDEDF2;
+    --shadow-2: 4px 4px 0 #EDEDF2;
+    --shadow-3: 8px 8px 0 #EDEDF2;
+}
+
+/* 毛玻璃总开关：关掉后所有面板回落为不透明实色 */
+:root[data-glass="0"] {
+    --win-alpha: 1;
+    --card-alpha: 1;
+    --chrome-alpha: 1;
+    --panel-blur: 0px;
+}
+
+/* ---------- 4. 窗口背景层 .win-bg ---------- */
+.win-bg {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity var(--dur) var(--ease);
+    background: var(--win-bg);
+    /* 背景自身的虚化与饱和度 —— 与「毛玻璃模糊」是两个独立层次 */
+    filter: blur(var(--bg-blur)) saturate(var(--bg-sat));
+}
+
+/* 图片背景：由设置面板写入 --win-bg-image */
+.win-bg::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: var(--win-bg-image);
+    background-size: cover;
+    background-position: center;
+    opacity: 0;
+    transition: opacity var(--dur) var(--ease);
+}
+
+:root[data-bg="image"] .win-bg::before {
+    opacity: 1;
+}
+
+/* 可读性蒙版：花哨壁纸下压暗，保证文字对比度 */
+.win-bg::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: var(--scrim);
+    background: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, .25) 55%, #000 100%);
+}
+
+/* 桌宠模式：浮窗保持完全透明，只有贴图 / 动作条 / 状态条 */
+body:not(.chat-mode):not(.settings-mode):not(.companion-mode) .win-bg {
+    opacity: 0;
+}
+
+body.chat-mode .win-bg,
+body.settings-mode .win-bg,
+body.companion-mode .win-bg {
+    opacity: 1;
+}
+
+/* UI 层必须位于背景层之上，backdrop-filter 才能取到它 */
+.float-container,
+.chat-container,
+.settings-panel {
+    z-index: 1;
+}
+
+/* ---------- 5. 材质工具类 ---------- */
+.surface {
+    background: rgba(var(--surface-rgb), var(--win-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+}
+
+.surface-card {
+    background: rgba(var(--surface-rgb), var(--card-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+}
+
+.surface-chrome {
+    background: rgba(var(--surface-muted-rgb), var(--chrome-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+}
+
+/* ---------- 6. 桌宠模式：常驻动作条（四个按钮） ---------- */
+.pet-action-bar {
+    position: fixed;
+    left: 50%;
+    /* 叠在状态条上方（状态条铺满整宽、按钮条居中） */
+    bottom: calc(var(--pet-stat-h, 40px) + 6px);
+    transform: translateX(-50%);
+    z-index: 996;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    /* 高度由「按钮大小」派生（float.js 写入 --pet-action-h） */
+    height: var(--pet-action-h, 36px);
+    padding: 0 8px;
+    box-sizing: border-box;
+    pointer-events: auto;
+    background: transparent;
+    border: 0;
+    opacity: 0;
+    transition: opacity var(--dur) var(--ease);
+}
+
+body:not(.chat-mode):not(.settings-mode):not(.companion-mode) .pet-action-bar {
+    opacity: 1;
+}
+
+body.chat-mode .pet-action-bar,
+body.settings-mode .pet-action-bar,
+body.companion-mode .pet-action-bar {
+    display: none !important;
+}
+
+.pab-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    /* 尺寸由「按钮大小」设置驱动：float.js 写入 --pet-action-btn-size */
+    height: var(--pet-action-btn-size, 30px);
+    min-width: var(--pet-action-btn-size, 30px);
+    padding: 0 5px;
+    font-size: calc(var(--pet-action-btn-size, 30px) * 0.42);
+    border: var(--border-w) solid var(--border);
+    border-radius: calc(var(--radius) + 2px);
+    background: rgba(var(--surface-rgb), var(--card-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    box-shadow: var(--shadow-1);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease),
+                transform var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.pab-item:hover {
+    background: var(--brand-soft);
+    border-color: var(--brand);
+    color: var(--brand-hover);
+    transform: translateY(-2px);
+}
+
+.pab-item:active {
+    transform: translateY(0) scale(.94);
+}
+
+.pab-item .pab-label {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .2px;
+}
+
+/* hover 出中文标签：解决「猜 emoji」 */
+.pab-item .pab-tip {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%) translateY(2px);
+    padding: 3px 8px;
+    border-radius: calc(var(--radius) + 1px);
+    background: rgba(20, 22, 32, .92);
+    color: #fff;
+    font-size: 10.5px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+
+.pab-item:hover .pab-tip {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+.pab-item.primary {
+    background: var(--brand);
+    border-color: var(--brand);
+    color: var(--brand-on);
+}
+
+.pab-item.primary:hover {
+    background: var(--brand-hover);
+    border-color: var(--brand-hover);
+    color: var(--brand-on);
+}
+
+/* ---------- 7. 浮窗：贴图与状态条让位给底部动作条 ----------
+   注：鼠标靠近弹出的 2×2 按钮气泡已取消（动作改为底部常驻动作条，
+   两者完全重复且会被 DSH 任务面板遮挡），这里只保留布局让位规则。
+   贴图与按钮之间的间距由 --pet-action-gap 控制（float.js 按设置写入）。 */
+body:not(.chat-mode):not(.settings-mode):not(.companion-mode) .float-pet {
+    bottom: calc(var(--pet-action-gap, 10px) + var(--pet-action-h, 36px) + var(--pet-stat-h, 40px));
+}
+
+body:not(.chat-mode):not(.settings-mode):not(.companion-mode) .float-bubble {
+    display: none !important;
+}
+
+/* ---------- 8. 状态条（覆盖 float.js 注入的样式） ----------
+   竖直堆叠顺序（自窗口底边往上）：
+     0                    状态条（DSH 连接 / 硬件 / 峰谷）
+     状态条高 + 6          底部动作条（四个按钮）
+     + 36 + 6              桌宠贴图
+     贴图上方                DSH 任务面板（由 float.js 像素定位）
+   间距常量必须与 float.js 的 PET_STAT_H / PET_STAT_ACTION_GAP /
+   PET_ACTION_H / PET_ACTION_PET_GAP 一致。 */
+body:not(.chat-mode):not(.settings-mode):not(.companion-mode) .pet-stat-bar {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 0;
+    height: var(--pet-stat-h, 40px);
+    box-sizing: border-box;
+    z-index: 995;
+    width: max-content;
+    max-width: calc(100vw - 16px);
+    padding: 3px 10px;
+    box-sizing: border-box;
+    background: rgba(var(--surface-rgb), var(--card-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    border: var(--border-w) solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-1);
+    color: var(--text);
+    font-size: 10px;
+    line-height: 1.6;
+    text-align: center;
+    white-space: normal;
+    word-break: break-all;
+    cursor: pointer;
+    pointer-events: auto;
+    transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+body:not(.chat-mode):not(.settings-mode):not(.companion-mode) .pet-stat-bar:hover {
+    border-color: var(--brand);
+    background: var(--brand-soft);
+    color: var(--brand-hover);
+}
+
+/* ---------- 9. 聊天窗口：保留立绘栏，整体套窗口背景 + 毛玻璃 ---------- */
+body.chat-mode .chat-container {
+    background: transparent;
+    z-index: 1;
+}
+
+body.chat-mode .chat-illust-panel {
+    background: rgba(var(--surface-rgb), calc(var(--win-alpha) - .06));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+}
+
+body.chat-mode .chat-main {
+    background: rgba(var(--surface-rgb), var(--win-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+}
+
+body.chat-mode .chat-header {
+    background: rgba(var(--surface-muted-rgb), var(--chrome-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    border-bottom: var(--border-w) solid var(--border);
+    color: var(--text);
+    font-weight: var(--font-weight-title);
+}
+
+body.chat-mode .chat-illust-divider {
+    background: rgba(var(--surface-muted-rgb), var(--chrome-alpha));
+    border-left: var(--border-w) solid var(--border);
+    border-right: var(--border-w) solid var(--border);
+}
+
+body.chat-mode .chat-log {
+    background: transparent;
+}
+
+body.chat-mode .chat-close-btn,
+body.chat-mode .chat-settings-btn {
+    color: var(--text-muted);
+    border-radius: var(--radius);
+}
+
+body.chat-mode .chat-close-btn:hover,
+body.chat-mode .chat-settings-btn:hover {
+    background: rgba(var(--surface-rgb), .5);
+    color: var(--text);
+}
+
+body.chat-mode .chat-message.user {
+    background: linear-gradient(135deg, var(--brand), var(--brand-hover));
+    color: var(--brand-on);
+    border: var(--border-w) solid transparent;
+}
+
+body.chat-mode .chat-message.from-pet {
+    background: rgba(var(--surface-rgb), calc(var(--card-alpha) + .12));
+    -webkit-backdrop-filter: blur(calc(var(--panel-blur) * .6)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(calc(var(--panel-blur) * .6)) saturate(var(--panel-saturate));
+    border: var(--border-w) solid var(--border);
+    color: var(--text);
+}
+
+body.chat-mode .chat-message.from-pet.agent-mode {
+    background: rgba(var(--surface-muted-rgb), var(--card-alpha));
+    color: var(--text-muted);
+    border-color: var(--border);
+}
+
+body.chat-mode .chat-input-area {
+    background: rgba(var(--surface-muted-rgb), var(--chrome-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    border-top: var(--border-w) solid var(--border);
+}
+
+body.chat-mode .chat-input-area input {
+    background: rgba(var(--surface-rgb), .72);
+    border: var(--border-w) solid var(--border-strong);
+    border-radius: var(--radius-full);
+    color: var(--text);
+}
+
+body.chat-mode .chat-input-area input:focus {
+    border-color: var(--brand);
+}
+
+body.chat-mode .float-send-btn {
+    background: var(--brand);
+    border: var(--border-w) solid var(--brand);
+    border-radius: var(--radius-full);
+    color: var(--brand-on);
+}
+
+body.chat-mode .float-send-btn:hover {
+    background: var(--brand-hover);
+    border-color: var(--brand-hover);
+}
+
+body.chat-mode .save-chat-btn {
+    background: rgba(var(--surface-rgb), .72);
+    border: var(--border-w) solid var(--border);
+    border-radius: var(--radius-full);
+    color: var(--text);
+}
+
+body.chat-mode .save-chat-btn:hover {
+    background: var(--brand-soft);
+    border-color: var(--brand);
+}
+
+body.chat-mode .loading-indicator {
+    background: rgba(var(--surface-rgb), var(--card-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    border: var(--border-w) solid var(--border);
+    border-radius: var(--radius-full);
+}
+
+body.chat-mode .chat-illust-panel .illust-placeholder {
+    background: rgba(var(--surface-rgb), .5);
+    border-radius: var(--radius-card);
+}
+
+/* ---------- 10. 设置窗口：一体式毛玻璃面板 ---------- */
+body.settings-mode .settings-panel {
+    background: transparent;
+    z-index: 1;
+}
+
+body.settings-mode .settings-box {
+    background: rgba(var(--surface-rgb), var(--win-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    border: var(--border-w) solid var(--border);
+    box-shadow: var(--shadow-2);
+}
+
+body.settings-mode .settings-box .sb-head {
+    background: rgba(var(--surface-muted-rgb), var(--chrome-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    border-bottom: var(--border-w) solid var(--border);
+    color: var(--text);
+    font-weight: var(--font-weight-title);
+}
+
+body.settings-mode .settings-box .sb-close {
+    color: var(--text-muted);
+    border-radius: var(--radius);
+}
+
+body.settings-mode .settings-box .sb-close:hover {
+    background: rgba(var(--surface-rgb), .5);
+    color: var(--text);
+}
+
+body.settings-mode .settings-box .sb-body {
+    background: transparent;
+}
+
+/* 分组卡片：玻璃卡片 + 令牌圆角 */
+body.settings-mode .sb-group {
+    background: rgba(var(--surface-rgb), var(--card-alpha));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    border: var(--border-w) solid var(--border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-1);
+}
+
+body.settings-mode .sb-group-title {
+    color: var(--text);
+    font-weight: var(--font-weight-title);
+}
+
+body.settings-mode .sb-item > label,
+body.settings-mode .sb-group label {
+    color: var(--text-muted);
+}
+
+body.settings-mode .sb-range-label {
+    color: var(--brand-hover);
+}
+
+body.settings-mode .sb-btn {
+    border: var(--border-w) solid var(--border-strong);
+    border-radius: var(--radius);
+    background: rgba(var(--surface-rgb), calc(var(--card-alpha) + .12));
+    color: var(--text);
+}
+
+body.settings-mode .sb-btn.primary {
+    background: var(--brand);
+    border-color: var(--brand);
+    color: var(--brand-on);
+}
+
+body.settings-mode .sb-btn.danger {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+}
+
+body.settings-mode input[type="text"],
+body.settings-mode input[type="number"],
+body.settings-mode select,
+body.settings-mode textarea {
+    background: rgba(var(--surface-rgb), .72);
+    border: var(--border-w) solid var(--border-strong);
+    border-radius: var(--radius);
+    color: var(--text);
+}
+
+body.settings-mode input[type="text"]:focus,
+body.settings-mode input[type="number"]:focus,
+body.settings-mode select:focus,
+body.settings-mode textarea:focus {
+    border-color: var(--brand);
+}
+
+body.settings-mode .theme-swatch {
+    border-radius: calc(var(--radius) + 3px);
+}
+
+body.settings-mode .theme-swatch.active {
+    border-color: var(--text);
+}
+
+/* ---------- 11. 设置面板：左导航 + 右内容（两栏）+ 全局搜索 ---------- */
+body.settings-mode .settings-box {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* 搜索栏 */
+body.settings-mode .sb-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+    padding: 8px 12px;
+    background: rgba(var(--surface-muted-rgb), calc(var(--chrome-alpha) + .06));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    border-bottom: var(--border-w) solid var(--border);
+}
+
+body.settings-mode .sb-search-ico {
+    font-size: 12px;
+    flex: none;
+    opacity: .8;
+}
+
+body.settings-mode .sb-search input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 30px;
+    padding: 0 12px;
+    border: var(--border-w) solid var(--border);
+    border-radius: var(--radius-full);
+    background: rgba(var(--surface-rgb), .78);
+    color: var(--text);
+    font-family: inherit;
+    font-size: var(--fs-body, 12.5px);
+    outline: 0;
+}
+
+body.settings-mode .sb-search input:focus {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px var(--brand-soft);
+}
+
+/* 去掉浏览器给 type=text 加的原生清除按钮（我们自己有一个） */
+body.settings-mode .sb-search input::-webkit-search-cancel-button {
+    display: none;
+}
+
+body.settings-mode .sb-search-clear {
+    flex: none;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-faint);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+body.settings-mode .sb-search-clear:hover {
+    background: rgba(var(--surface-rgb), .6);
+    color: var(--text);
+}
+
+/* 两栏主体 */
+body.settings-mode .sb-main {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    align-items: stretch;
+}
+
+body.settings-mode .sb-nav {
+    flex: 0 0 158px;
+    width: 158px;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 8px 7px;
+    background: rgba(var(--surface-muted-rgb), calc(var(--chrome-alpha) - .06));
+    -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    backdrop-filter: blur(var(--panel-blur)) saturate(var(--panel-saturate));
+    border-right: var(--border-w) solid var(--border);
+}
+
+body.settings-mode .sb-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding: 7px 9px;
+    margin-bottom: 2px;
+    border: var(--border-w) solid transparent;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: var(--fs-body, 12.5px);
+    line-height: 1.35;
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease),
+                border-color var(--dur) var(--ease);
+}
+
+body.settings-mode .sb-nav-item:hover {
+    background: rgba(var(--surface-rgb), .55);
+    color: var(--text);
+}
+
+body.settings-mode .sb-nav-item.active {
+    background: var(--brand);
+    border-color: var(--brand);
+    color: var(--brand-on);
+    font-weight: 600;
+}
+
+/* 命中搜索时，隐藏的条目不参与布局 */
+body.settings-mode .sb-item[style*="display: none"] {
+    display: none;
+}
+
+body.settings-mode .sb-nav-ico {
+    flex: none;
+    font-size: 13px;
+}
+
+body.settings-mode .sb-nav-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.settings-mode .sb-nav-count {
+    flex: none;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: var(--radius-full);
+    background: var(--brand-soft-strong);
+    color: var(--brand-hover);
+    font-weight: 600;
+}
+
+body.settings-mode .sb-nav-item.active .sb-nav-count {
+    background: rgba(255, 255, 255, .28);
+    color: var(--brand-on);
+}
+
+body.settings-mode .sb-body {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+    padding: 12px 14px 20px;
+}
+
+/* 分区内分列：短分组并排，减少竖直滚动（列数由 float.js 写入 data-col） */
+body.settings-mode .sb-body {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: 12px;
+}
+
+body.settings-mode .sb-body > .sb-group {
+    margin-bottom: 0;
+    min-width: 0;
+}
+
+body.settings-mode .sb-body > .sb-group[data-col="half"] {
+    flex: 1 1 calc(50% - 6px);
+    max-width: calc(50% - 6px);
+}
+
+body.settings-mode .sb-body > .sb-group[data-col="full"] {
+    flex: 1 1 100%;
+    max-width: 100%;
+}
+
+body.settings-mode .sb-empty {
+    padding: 28px 12px;
+    text-align: center;
+    color: var(--text-faint);
+    font-size: var(--fs-caption, 11px);
+}
+
+/* 搜索命中高亮 */
+body.settings-mode .sb-group mark,
+body.settings-mode .sb-body mark {
+    background: color-mix(in srgb, var(--brand) 26%, transparent);
+    color: inherit;
+    border-radius: 3px;
+    padding: 0 2px;
+}
+
+/* 窄窗口（用户手动拖窄时）收缩导航；<380px 直接藏掉导航只留内容 */
+@media (max-width: 520px) {
+    body.settings-mode .sb-nav {
+        flex-basis: 118px;
+        width: 118px;
+    }
+
+    body.settings-mode .sb-nav-count {
+        display: none;
+    }
+}
+
+@media (max-width: 380px) {
+    body.settings-mode .sb-nav {
+        display: none;
+    }
+}
+
+/* 窄屏单栏：隐藏左导航，内容占满；设置里可手动切换 */
+:root[data-ui="compact"] body.settings-mode .sb-nav {
+    display: none;
+}
+
+:root[data-ui="compact"] body.settings-mode .sb-body {
+    padding-left: 12px;
+    padding-right: 12px;
+}
+
+/* ---------- 12. 设置面板：窗口背景 / 材质控件 ---------- */
+body.settings-mode .sb-hint {
+    font-size: 10.5px;
+    color: var(--text-faint);
+    line-height: 1.5;
+    margin-top: 4px;
+    width: 100%;
+}
+
+body.settings-mode .bg-preset-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 4px 0 8px;
+    width: 100%;
+}
+
+body.settings-mode .bg-preset {
+    width: 54px;
+    height: 34px;
+    padding: 0;
+    border: var(--border-w) solid var(--border-strong);
+    border-radius: var(--radius);
+    background-clip: padding-box;
+    cursor: pointer;
+    box-shadow: var(--shadow-1);
+    transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease),
+                box-shadow var(--dur) var(--ease);
+}
+
+body.settings-mode .bg-preset:hover {
+    transform: translateY(-2px);
+    border-color: var(--brand);
+}
+
+body.settings-mode .bg-preset.active {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 2px var(--brand-soft-strong);
+}
+
+body.settings-mode .bg-image-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    width: 100%;
+}
+
+body.settings-mode .bg-image-row .sb-mini-btn {
+    white-space: nowrap;
+    flex: 0 0 auto;
+    width: auto;
+}
+
+body.settings-mode .bg-image-name {
+    font-size: 10.5px;
+    color: var(--text-faint);
+    word-break: break-all;
+    flex: 1 1 120px;
+    min-width: 0;
+}
+
+/* ---------- 13. 主题切换过渡：与 --dur / --ease 令牌联动 ---------- */
+.float-container,
+.float-bubble,
+.pet-stat-bar,
+.pet-action-bar,
+.chat-illust-panel,
+.chat-main,
+.chat-header,
+.chat-log,
+.chat-input-area,
+.settings-panel,
+.settings-box,
+.sb-group {
+    transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease),
+                color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .float-container,
+    .float-bubble,
+    .pet-stat-bar,
+    .pet-action-bar,
+    .chat-illust-panel,
+    .chat-main,
+    .chat-header,
+    .chat-input-area,
+    .settings-box,
+    .sb-group {
+        transition: none;
+    }
+}
+/* ==== UI-REDESIGN-INJECT-END ==== */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

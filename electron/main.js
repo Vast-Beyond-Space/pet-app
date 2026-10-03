@@ -7,12 +7,54 @@
  * 5. 聊天窗口加载 float.html?mode=chat，复用现有渲染逻辑
  */
 
-const { app, BrowserWindow, Menu, Tray, ipcMain, screen, nativeImage, globalShortcut, shell, dialog } = require('electron');
+const { app, BrowserWindow, Menu, Tray, ipcMain, screen, nativeImage, globalShortcut, shell, dialog, powerMonitor } = require('electron') || {};
+
+// 明确诊断「Electron 被当成 Node 运行」这一常见误启动：
+// 当环境变量 ELECTRON_RUN_AS_NODE=1 存在时（某些受限终端会注入），
+// require('electron') 只返回 electron.exe 的路径字符串，app 为 undefined，
+// 后续 app.commandLine 会直接抛 TypeError，报错信息很难看出真正原因。
+if (!app || typeof app.commandLine !== 'object') {
+    console.error('[Main] 启动失败：当前进程没有拿到 Electron 运行时（app 为 undefined）。');
+    console.error('[Main] 这通常是因为环境变量 ELECTRON_RUN_AS_NODE 被设置，使 electron 以纯 Node 模式运行。');
+    console.error('[Main] 排查：在同一个终端执行  echo %ELECTRON_RUN_AS_NODE%  （应为空）');
+    console.error('[Main] 修复：set ELECTRON_RUN_AS_NODE=  然后重新执行 npm start');
+    process.exit(1);
+}
 const path = require('path');
 const fs = require('fs');
 const { spawn, execSync, execFileSync } = require('child_process');
 const https = require('https');
 const http = require('http');
+// 统一的候选链 / 重试 / 备选回退编排（与 float.js 等渲染进程共用同一套实现）
+const AIFallback = require('./ai-fallback.js');
+
+// 可选：为 UI 自检 / 自动化验收开启 Chromium 远程调试端口。
+// 默认完全关闭；只有显式给出 --remote-debugging-port=<port> 或设置
+// PET_APP_DEBUG_PORT 时才启用，普通用户运行不受影响。
+(() => {
+    const fromArgv = process.argv.find((a) => /^--remote-debugging-port=\d+$/.test(a));
+    const fromEnv = /^\d+$/.test(String(process.env.PET_APP_DEBUG_PORT || ''))
+        ? '--remote-debugging-port=' + process.env.PET_APP_DEBUG_PORT
+        : null;
+    const switchValue = fromArgv || fromEnv;
+    if (switchValue) {
+        app.commandLine.appendSwitch('remote-debugging-port', switchValue.split('=')[1]);
+        console.log('[Main] 已开启远程调试端口 ' + switchValue.split('=')[1] + '（仅供 UI 自检）');
+    }
+})();
+
+// 关闭 Chromium 沙箱：本机（Windows 10 19044 / 受限终端 / 远程会话）
+// 带沙箱启动时 Chromium 初始化会失败，进程被系统以断点异常终止
+// （退出码 0x80000003 = -2147483645，表现为「命令一闪而过、什么都不打印」）。
+// 曾在同一台机器上逐项验证：--disable-gpu / --disable-gpu-compositing /
+// --disable-gpu-sandbox / --in-process-gpu / --use-gl=swiftshader 均无效，
+// 只有关闭沙箱才能启动。放在这里而不是 package.json，是为了让 `electron .`
+// 原样可用（日志直接打在终端里）。
+// 如需恢复沙箱：设置环境变量 PET_APP_KEEP_SANDBOX=1 后启动。
+if (process.platform === 'win32' && process.env.PET_APP_KEEP_SANDBOX !== '1') {
+    app.commandLine.appendSwitch('no-sandbox');
+    app.commandLine.appendSwitch('disable-gpu-sandbox');
+}
 
 // 禁用 GPU 缓存，避免 Windows 打包后出现 cache_util_win.cc 错误
 app.commandLine.appendSwitch('disable-gpu-cache');
@@ -78,10 +120,17 @@ let floatSessionId = 0; // 浮窗会话编号，用于区分不同浮窗实例�
 // ===== 多模态（智谱 AI）全局状态 =====
 let zhipuApiKey = '';
 let multimodalEnabled = false;
-// 多模态提供商：'deepseek' | 'zhipu'
+// 多模态提供商：'deepseek' | 'zhipu' | 'local'
 let multimodalProvider = 'deepseek';
 // 智谱多模态 API 地址（DeepSeek 复用 apiUrl/apiKey）
 let zhipuApiUrl = '';
+// ===== 本地 LLM（OpenAI 兼容：Ollama / LM Studio / vLLM 等）=====
+let localApiUrl = '';
+let localApiKey = '';
+let localModel = '';
+let localCompanionModel = '';
+let localMemoryModel = '';
+let localVisionModel = '';
 let aiPrompt = '';
 let voiceEnabled = true;
 let selectedVoice = 'default';
@@ -101,7 +150,7 @@ let buttonSize = 40;
 let portraitAuto = true;
 
 function broadcastConfigUpdate() {
-    const config = { zhipuApiKey, multimodalEnabled, multimodalProvider, zhipuApiUrl, aiPrompt, voiceEnabled, selectedVoice, voiceVolume, companionFontSize, companionPetSize, stickerPack };
+    const config = { zhipuApiKey, multimodalEnabled, multimodalProvider, zhipuApiUrl, localApiUrl, localApiKey, localModel, localCompanionModel, localMemoryModel, localVisionModel, aiPrompt, voiceEnabled, selectedVoice, voiceVolume, companionFontSize, companionPetSize, stickerPack };
     BrowserWindow.getAllWindows().forEach(win => {
         if (!win.isDestroyed()) win.webContents.send('config-updated', config);
     });
@@ -122,17 +171,58 @@ function broadcastHomeSettingsUpdate() {
 // 从而让所有窗口共用同一套设置并实时同步。
 let unifiedConfig = {};
 function configFile() { return path.join(app.getPath('userData'), 'petAppConfig.json'); }
+// 备用配置路径：极少数环境（受限沙箱 / 安全软件）会屏蔽主进程对 AppData 的写入，
+// 此时写入调用不报错、但文件内容不会更新。落盘后立刻回读校验，失败就改用应用目录。
+function configFileFallback() { return path.join(__dirname, 'petAppConfig.json'); }
 function loadUnifiedConfig() {
+    // 两个路径都可能存在：取修改时间更新的那一份。
+    // 只按固定顺序读会踩到「备用路径刚写成功、主路径还是旧内容」的情况。
+    let best = null;
+    for (const f of [configFile(), configFileFallback()]) {
+        try {
+            if (!fs.existsSync(f)) continue;
+            const mtime = fs.statSync(f).mtimeMs;
+            const parsed = JSON.parse(fs.readFileSync(f, 'utf8'));
+            if (!parsed || typeof parsed !== 'object') continue;
+            if (!best || mtime > best.mtime) best = { file: f, mtime, parsed };
+        } catch (e) { /* 试下一个 */ }
+    }
+    if (best) {
+        unifiedConfig = best.parsed;
+        console.log('[Main] 已加载配置:', best.file, '字段=' + Object.keys(best.parsed).length,
+            '时间=' + new Date(best.mtime).toISOString());
+    }
+}
+/** 写盘并回读校验；返回 true 表示确认落盘 */
+function writeConfigTo(file) {
+    const payload = JSON.stringify(unifiedConfig, null, 2);
     try {
-        if (fs.existsSync(configFile())) {
-            const parsed = JSON.parse(fs.readFileSync(configFile(), 'utf8'));
-            if (parsed && typeof parsed === 'object') unifiedConfig = parsed;
-        }
-    } catch (e) {}
+        fs.writeFileSync(file, payload);
+        // 回读校验：能读到同样内容才算真的写进去
+        const back = fs.readFileSync(file, 'utf8');
+        return back === payload;
+    } catch (e) {
+        console.error('[Main] 配置写入失败:', e && e.code, e && e.message, '路径:', file);
+        return false;
+    }
 }
 function saveUnifiedConfig() {
-    try { fs.writeFileSync(configFile(), JSON.stringify(unifiedConfig, null, 2)); } catch (e) {}
+    if (writeConfigTo(configFile())) return;
+    if (writeConfigTo(configFileFallback())) {
+        console.warn('[Main] 主配置路径不可写，已改用备用路径:', configFileFallback());
+        return;
+    }
+    console.error('[Main] 配置无法落盘（两个路径都失败），本次改动只在内存与本窗口内有效');
 }
+
+// 一次性自检：确认主进程能否把配置写到磁盘（渲染进程调用 electronAPI.logToMain('__diag','__diag_save') 触发）
+ipcMain.on('renderer-log', (event, payload) => {
+    if (!payload || payload.message !== '__diag_save') return;
+    const payloadKeys = Object.keys(unifiedConfig).length;
+    const ok = writeConfigTo(configFile()) || writeConfigTo(configFileFallback());
+    console.log('[diag] 落盘自检 内存字段=' + payloadKeys + ' 结果=' + (ok ? '成功' : '失败') +
+        ' 主路径=' + configFile() + ' 备用路径=' + configFileFallback());
+});
 
 // 启动时把权威配置（petAppConfig.json）回灌到主进程运行的各状态变量，
 // 否则这些变量保持默认值（如 stickerPack='默认'、zhipuApiKey=''），
@@ -144,6 +234,12 @@ function hydrateRuntimeFromUnified() {
     if (c.multimodalEnabled != null) multimodalEnabled = !!c.multimodalEnabled;
     if (c.multimodalProvider != null) multimodalProvider = c.multimodalProvider;
     if (c.zhipuApiUrl != null) zhipuApiUrl = c.zhipuApiUrl;
+    if (c.localApiUrl != null) localApiUrl = c.localApiUrl;
+    if (c.localApiKey != null) localApiKey = c.localApiKey;
+    if (c.localModel != null) localModel = c.localModel;
+    if (c.localCompanionModel != null) localCompanionModel = c.localCompanionModel;
+    if (c.localMemoryModel != null) localMemoryModel = c.localMemoryModel;
+    if (c.localVisionModel != null) localVisionModel = c.localVisionModel;
     if (c.aiPrompt != null) aiPrompt = c.aiPrompt;
     if (c.voiceEnabled != null) voiceEnabled = !!c.voiceEnabled;
     if (c.selectedVoice != null) selectedVoice = c.selectedVoice;
@@ -158,17 +254,37 @@ function hydrateRuntimeFromUnified() {
 }
 
 // 渲染进程启动时拉取权威配置
-ipcMain.handle('config-get', () => unifiedConfig);
+ipcMain.handle('config-get', () => {
+    // [companion-debug] 返回给渲染进程的陪伴字段，确认主进程是否存住了配置
+    console.log('[companion-debug][main:config-get]', {
+        companionFontSize: unifiedConfig.companionFontSize, companionPetSize: unifiedConfig.companionPetSize,
+        companionThoughtFreq: unifiedConfig.companionThoughtFreq, companionThoughtVisible: unifiedConfig.companionThoughtVisible,
+        companionTalkThreshold: unifiedConfig.companionTalkThreshold, companionScreenSensitivity: unifiedConfig.companionScreenSensitivity
+    });
+    return unifiedConfig;
+});
 
 // 渲染进程改动配置 → 全量同步到主进程并广播给其它窗口（排除发送源，避免回声干扰拖拽）
 ipcMain.on('config-sync', (event, cfg) => {
     if (!cfg || typeof cfg !== 'object') return;
+    // [companion-debug] 主进程收到配置同步时打印陪伴字段，确认是否真正传入
+    console.log('[companion-debug][main:config-sync]', {
+        companionFontSize: cfg.companionFontSize, companionPetSize: cfg.companionPetSize,
+        companionThoughtFreq: cfg.companionThoughtFreq, companionThoughtVisible: cfg.companionThoughtVisible,
+        companionTalkThreshold: cfg.companionTalkThreshold, companionScreenSensitivity: cfg.companionScreenSensitivity
+    });
     unifiedConfig = { ...unifiedConfig, ...cfg };
     // 同步到各自独立的状态变量，保持主进程运行时状态一致
     if (cfg.zhipuApiKey != null) zhipuApiKey = cfg.zhipuApiKey;
     if (cfg.multimodalEnabled != null) multimodalEnabled = !!cfg.multimodalEnabled;
     if (cfg.multimodalProvider != null) multimodalProvider = cfg.multimodalProvider;
     if (cfg.zhipuApiUrl != null) zhipuApiUrl = cfg.zhipuApiUrl;
+    if (cfg.localApiUrl != null) localApiUrl = cfg.localApiUrl;
+    if (cfg.localApiKey != null) localApiKey = cfg.localApiKey;
+    if (cfg.localModel != null) localModel = cfg.localModel;
+    if (cfg.localCompanionModel != null) localCompanionModel = cfg.localCompanionModel;
+    if (cfg.localMemoryModel != null) localMemoryModel = cfg.localMemoryModel;
+    if (cfg.localVisionModel != null) localVisionModel = cfg.localVisionModel;
     if (cfg.aiPrompt != null) aiPrompt = cfg.aiPrompt;
     if (cfg.voiceEnabled != null) voiceEnabled = !!cfg.voiceEnabled;
     if (cfg.selectedVoice != null) selectedVoice = cfg.selectedVoice;
@@ -773,6 +889,40 @@ function closeCookieWindow() {
     }
 }
 
+// 记忆文本清洗：去掉 data URL 与图片块 JSON 残片。
+// 历史 bug：把用户消息里的图片块整段 JSON.stringify 进了记忆文本，产生
+// 「我喜欢群青色 {"type":"image_url","image_url":{"url":"data:image/jp…」这种脏记忆。
+function sanitizeMemoryText(raw) {
+    let s = String(raw == null ? '' : raw);
+    s = s.replace(/\[\s*截图[^\]]*\]/g, ' ');
+    s = s.replace(/\[(?:MEMORY|SHORT_MEMORY|AGENT_MODE)[^\]]*\]/gi, ' ');
+    s = s.replace(/data:image\/[a-zA-Z]+;base64,[A-Za-z0-9+/=\s]+/g, '');
+    s = s.replace(/\{\s*"type"\s*:\s*"[^"]*"[\s\S]*$/, '');
+    s = s.replace(/\{\s*"[\s\S]{0,400}$/, '');
+    s = s.replace(/"?image_url"?\s*:\s*\{?/gi, '').replace(/"url"\s*:\s*/gi, '');
+    s = s.replace(/[{}\[\]"]+/g, '');
+    return s.replace(/\s+/g, ' ').trim();
+}
+
+// 修复记忆数组里的脏条目；返回 { items, healed }
+// 只清洗脏数据（图片块 JSON / data URL / [截图] 占位符），不改写人称——
+// 人称由提示词约束模型自己分清楚。
+function healMemoryItems(items) {
+    if (!Array.isArray(items)) return { items: [], healed: 0 };
+    let healed = 0;
+    const out = [];
+    for (const m of items) {
+        if (!m || m.type === 'image') { out.push(m); continue; }
+        const before = String(m.text || '');
+        if (!before || !/\{"type"|data:image|image_url|\[\s*截图/i.test(before)) { out.push(m); continue; }
+        const after = sanitizeMemoryText(before);
+        healed++;
+        if (after.length >= 2) out.push({ ...m, text: after });
+        // 清洗后没内容就整条丢弃（避免留下空记忆）
+    }
+    return { items: out, healed };
+}
+
 // 记忆文件路径
 let memoryFilePath = '';
 
@@ -784,7 +934,14 @@ function loadMemoryFromFile() {
         }
         if (fs.existsSync(memoryFilePath)) {
             const data = fs.readFileSync(memoryFilePath, 'utf-8');
-            return JSON.parse(data);
+            const parsed = JSON.parse(data);
+            // 读取时顺手修复历史脏记忆（主进程是唯一写盘方，安全）
+            const { items, healed } = healMemoryItems(parsed);
+            if (healed > 0) {
+                console.log('[main] 已修复 ' + healed + ' 条脏记忆（图片块 JSON/data URL 残留）');
+                saveMemoryToFile(items);
+            }
+            return items;
         }
     } catch (e) {
         console.error('Failed to read memory file:', e);
@@ -828,6 +985,44 @@ ipcMain.handle('memory-save', async (event, items) => {
         broadcastMemoryUpdate(items);
     }
     return success;
+});
+
+// 记忆条目是否等价（用于追加去重）
+function memoryItemEqual(a, b) {
+    if (!a || !b) return false;
+    const at = String(a.text || '').trim();
+    const bt = String(b.text || '').trim();
+    if (at || bt) return at === bt;
+    const ad = String(a.description || '').trim();
+    const bd = String(b.description || '').trim();
+    if (a.fileId || b.fileId) return !!a.fileId && a.fileId === b.fileId;
+    return !!ad && ad === bd;
+}
+
+// IPC 处理：追加记忆（append-only，主进程合并写盘）。
+// 关键：多个窗口（浮窗 / 首页 / 设置）各自持有一份 memoryItems 快照，
+// 若都用 memory-save 整份覆盖，谁手里是旧数组谁就会把新记忆冲掉——
+// 这正是"总结完了却没写进去"的根因。新增一律走这里，只有"删除/编辑"才整份覆盖。
+ipcMain.handle('memory-append', async (event, items) => {
+    const incoming = Array.isArray(items) ? items : [];
+    if (!incoming.length) return { success: true, items: loadMemoryFromFile() };
+    try {
+        const existing = loadMemoryFromFile();
+        let added = 0;
+        for (const item of incoming) {
+            if (!item) continue;
+            if (existing.some(m => memoryItemEqual(m, item))) continue;
+            existing.push(item);
+            added++;
+        }
+        const ok = saveMemoryToFile(existing);
+        if (ok) broadcastMemoryUpdate(existing);
+        console.log('[main] memory-append: +' + added + ' 条，共 ' + existing.length + ' 条');
+        return { success: ok, added, items: existing };
+    } catch (e) {
+        console.error('[main] memory-append failed:', e);
+        return { success: false, added: 0, items: loadMemoryFromFile() };
+    }
 });
 
 // 创建系统托盘图标和菜单
@@ -923,9 +1118,14 @@ function createSettingsWindow() {
         settingsWindow.focus();
         return settingsWindow;
     }
+    // 设置窗口尺寸：左导航 + 右内容的两栏布局需要至少 ~620px 才不至于挤压，
+    // 默认给 760×680；最小宽度也一并抬高，避免用户拖窄后两栏打架
+    // （页面在 <460px 时会自动回落到单栏，见 css/float-ui-additions.css）。
     settingsWindow = new BrowserWindow({
-        width: 420,
-        height: 640,
+        width: 760,
+        height: 680,
+        minWidth: 460,
+        minHeight: 420,
         resizable: true,
         transparent: false,
         backgroundColor: '#ffffff',
@@ -1516,6 +1716,14 @@ ipcMain.on('exit-companion-mode', (event, target) => {
         if (mainWindow) {
             mainWindow.restore();
         }
+    } else if (target === 'pet') {
+        // 回到桌宠模式：退出陪伴，仅恢复桌宠浮窗立绘，主窗口保持最小化
+        if (!floatWindow || floatWindow.isDestroyed()) {
+            createFloatWindow();
+        } else {
+            floatWindow.show();
+            floatWindow.focus();
+        }
     }
 });
 
@@ -1556,9 +1764,18 @@ let ttsProcess = null;
 let ttsReady = false;
 
 // ===== TTS 依赖自动安装 =====
-// 运行前用与启动 TTS 相同的 Python 探测 edge_tts 是否可导入；若缺失则在运行时
-// 自动联网安装到该 Python（优先嵌入式 Python 自带 pip/ensurepip，兜底系统 pip --target），
-// 避免打包/开发环境下 postinstall 未成功导致 "ModuleNotFoundError: No module named 'edge_tts'"。
+// 运行前用与启动 TTS 相同的 Python 探测 edge_tts 是否可导入；若缺失则自动联网安装。
+// 关键点：嵌入式 Python（python-3.11.9-embed-amd64）**不自带 pip，也没有 ensurepip**，
+// 唯一可行的引导方式是运行 get-pip.py；而历史遗留的 python/get-pip.py 可能是不完整的
+// 下载（会被 Python 报 unterminated triple-quoted string），因此这里下载后必须校验：
+//   1) content-length 与实际字节数一致；
+//   2) 能被目标 Python compile() 通过。
+// 任一校验失败就换镜像重下，全部失败才降级（并打印真实原因，便于排查）。
+const GET_PIP_URLS = [
+    'https://bootstrap.pypa.io/get-pip.py',
+    'https://mirrors.aliyun.com/pypi/get-pip.py'
+];
+
 function edgeTtsInstalled(pythonPath) {
     try {
         execFileSync(pythonPath, ['-c', 'import edge_tts'], { stdio: 'ignore' });
@@ -1577,6 +1794,17 @@ function runCmdQuiet(cmd) {
     }
 }
 
+// 执行命令并返回 {ok, out}（失败时 out 为 stderr/stdout 末尾，便于日志定位）
+function runCmdCapture(cmd) {
+    try {
+        const out = execSync(cmd, { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' });
+        return { ok: true, out: String(out || '').trim() };
+    } catch (e) {
+        const detail = [e && e.stdout, e && e.stderr, e && e.message].filter(Boolean).join('\n');
+        return { ok: false, out: String(detail || '').trim().split('\n').slice(-3).join(' | ') };
+    }
+}
+
 // 嵌入式 Python 的 site-packages 目录；若 pythonPath 是系统命令则返回 null
 function embeddedSitePackages(pythonPath) {
     if (!pythonPath || pythonPath === 'python' || pythonPath === 'python3' || pythonPath === 'py' || /^py -/.test(pythonPath)) {
@@ -1585,53 +1813,211 @@ function embeddedSitePackages(pythonPath) {
     return path.join(path.dirname(pythonPath), 'Lib', 'site-packages');
 }
 
-function ensureTTSDeps(pythonPath) {
+// get-pip.py 是否完整可用（大小 + 语法编译双校验）
+function isValidGetPip(pythonPath, file) {
+    try {
+        if (!fs.existsSync(file)) return false;
+        if (fs.statSync(file).size < 500 * 1024) return false; // 官方约 2MB，明显偏小即视为截断
+        const check = runCmdCapture(`"${pythonPath}" -c "compile(open(r'${file}',encoding='utf-8').read(),'get-pip','exec')"`);
+        return check.ok;
+    } catch (e) {
+        return false;
+    }
+}
+
+// 下载 get-pip.py（带完整性校验，逐镜像重试）。返回可用的文件路径或 null
+async function fetchGetPip(pythonPath, destDir) {
+    fs.mkdirSync(destDir, { recursive: true });
+    const dest = path.join(destDir, 'get-pip.py');
+    if (isValidGetPip(pythonPath, dest)) return dest; // 已有可用副本
+    for (const url of GET_PIP_URLS) {
+        try {
+            console.log('[TTS] 下载 pip 引导脚本：' + url);
+            const buf = await downloadBuffer(url);
+            if (!buf || buf.length < 500 * 1024) {
+                console.warn('[TTS] get-pip.py 下载不完整（' + (buf ? buf.length : 0) + ' 字节），换下一个源');
+                continue;
+            }
+            fs.writeFileSync(dest, buf);
+            if (isValidGetPip(pythonPath, dest)) {
+                console.log('[TTS] get-pip.py 校验通过（' + buf.length + ' 字节）');
+                return dest;
+            }
+            console.warn('[TTS] get-pip.py 校验失败（内容损坏），换下一个源');
+            try { fs.rmSync(dest, { force: true }); } catch (e) {}
+        } catch (e) {
+            console.warn('[TTS] get-pip.py 下载失败：' + (e && e.message));
+        }
+    }
+    return null;
+}
+
+// 下载到内存 Buffer（支持重定向，校验 content-length）
+function downloadBuffer(url, redirectsLeft = 5) {
+    return new Promise((resolve, reject) => {
+        const req = https.get(url, (res) => {
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirectsLeft > 0) {
+                res.resume();
+                return resolve(downloadBuffer(new URL(res.headers.location, url).toString(), redirectsLeft - 1));
+            }
+            if (res.statusCode !== 200) {
+                res.resume();
+                return reject(new Error('HTTP ' + res.statusCode));
+            }
+            const expected = parseInt(res.headers['content-length'] || '0', 10);
+            const chunks = [];
+            res.on('data', (c) => chunks.push(c));
+            res.on('end', () => {
+                const buf = Buffer.concat(chunks);
+                if (expected && buf.length !== expected) {
+                    return reject(new Error(`下载不完整：${buf.length}/${expected} 字节`));
+                }
+                resolve(buf);
+            });
+            res.on('error', reject);
+        });
+        req.setTimeout(120000, () => req.destroy(new Error('下载超时')));
+        req.on('error', reject);
+    });
+}
+
+// 为嵌入式 Python 引导 pip（ensurepip → get-pip.py，逐镜像）
+async function bootstrapPip(pythonPath) {
+    if (runCmdCapture(`"${pythonPath}" -m pip --version`).ok) return true;
+
+    // 1) 官方 ensurepip（嵌入式发行版通常没有，失败属正常）
+    if (runCmdCapture(`"${pythonPath}" -m ensurepip --version`).ok) {
+        console.log('[TTS] 使用内置 ensurepip 引导 pip...');
+        if (runCmdQuiet(`"${pythonPath}" -m ensurepip --upgrade`) &&
+            runCmdCapture(`"${pythonPath}" -m pip --version`).ok) {
+            return true;
+        }
+    }
+
+    // 2) get-pip.py（嵌入式 Python 的真实可行路径）：优先用随包副本，其次重新下载到用户数据目录
+    const candidates = [
+        path.join(path.dirname(pythonPath), 'get-pip.py'),
+        path.join(app.getPath('userData'), 'pytools', 'get-pip.py')
+    ];
+    let script = candidates.find(f => isValidGetPip(pythonPath, f)) || null;
+    if (!script) {
+        script = await fetchGetPip(pythonPath, path.join(app.getPath('userData'), 'pytools'));
+    }
+    if (script) {
+        console.log('[TTS] 使用 get-pip.py 引导 pip：' + script);
+        const r = runCmdCapture(`"${pythonPath}" "${script}" --no-warn-script-location --disable-pip-version-check`);
+        if (!r.ok) console.warn('[TTS] get-pip.py 执行失败：' + r.out);
+        if (runCmdCapture(`"${pythonPath}" -m pip --version`).ok) {
+            console.log('[TTS] pip 引导成功');
+            return true;
+        }
+    }
+    console.warn('[TTS] pip 引导失败（嵌入式 Python 无 pip 且 get-pip.py 不可用）');
+    return false;
+}
+
+// 逐镜像安装 edge-tts 到目标 Python（useTarget=true 时装进嵌入式 site-packages）
+function pipInstallEdgeTts(pipCmd, useTarget, sitePackages) {
+    const indexes = [null, 'https://pypi.org/simple', 'https://pypi.tuna.tsinghua.edu.cn/simple', 'https://mirrors.aliyun.com/pypi/simple'];
+    for (const idx of indexes) {
+        const idxArg = idx ? ` --index-url "${idx}"` : '';
+        const targetArg = (useTarget && sitePackages) ? ` --target "${sitePackages}"` : '';
+        console.log(`[TTS] pip install edge-tts${idx ? '（镜像：' + idx + '）' : ''}`);
+        const r = runCmdCapture(`${pipCmd} install edge-tts${idxArg}${targetArg} --disable-pip-version-check`);
+        if (r.ok) return true;
+        console.warn('[TTS] 本次安装失败：' + r.out);
+    }
+    return false;
+}
+
+// 用户数据目录下的可写 Python 站点目录：打包安装到 Program Files 时
+// resources/python 通常不可写，pip 直接安装会因权限失败，这里作为兜底安装位置，
+// 启动 TTS/STT 子进程时通过 PYTHONPATH 注入。
+function userPythonSite() {
+    return path.join(app.getPath('userData'), 'pysite');
+}
+
+async function ensureTTSDeps(pythonPath) {
     if (!pythonPath) return false;
     if (edgeTtsInstalled(pythonPath)) {
         console.log('[TTS] edge_tts 已就绪');
         return true;
     }
-    console.log('[TTS] 检测到 edge_tts 缺失，尝试自动安装（可能需要联网）...');
+    console.log('[TTS] 检测到 edge_tts 缺失，尝试自动安装（需要联网）...');
     const sitePackages = embeddedSitePackages(pythonPath);
+
+    // 方式1：当前 Python 自带 pip（嵌入式运行时通常没有，需要先 bootstrap）
+    let pipCmd = null;
+    if (runCmdCapture(`"${pythonPath}" -m pip --version`).ok) {
+        pipCmd = `"${pythonPath}" -m pip`;
+    } else if (sitePackages) {
+        if (await bootstrapPip(pythonPath)) pipCmd = `"${pythonPath}" -m pip`;
+    }
+    if (pipCmd && pipInstallEdgeTts(pipCmd, false, null) && edgeTtsInstalled(pythonPath)) {
+        console.log('[TTS] edge_tts 安装完成');
+        return true;
+    }
+
+    // 方式2：兜底系统 Python/pip，把包装进嵌入式 site-packages
     if (sitePackages) {
-        // 方式1：嵌入式 Python 自带 pip
-        let installed = runCmdQuiet(`"${pythonPath}" -m pip install edge-tts --disable-pip-version-check`);
-        // 方式2：嵌入式 Python 无 pip 时，先引导 ensurepip 再装
-        if (!installed) {
-            installed = runCmdQuiet(`"${pythonPath}" -m ensurepip --upgrade`) &&
-                        runCmdQuiet(`"${pythonPath}" -m pip install edge-tts --disable-pip-version-check`);
-        }
-        // 方式3：兜底系统 Python/pip，--target 装入嵌入式 site-packages
-        if (!installed) {
-            for (const c of ['python', 'python3', 'py -3']) {
-                if (runCmdQuiet(`${c} -m pip install edge-tts --target "${sitePackages}" --disable-pip-version-check`)) {
-                    installed = true;
-                    break;
-                }
+        for (const c of ['python', 'python3', 'py -3']) {
+            if (!runCmdCapture(`${c} -m pip --version`).ok) continue;
+            if (pipInstallEdgeTts(c, true, sitePackages) && edgeTtsInstalled(pythonPath)) {
+                console.log('[TTS] edge_tts 安装完成（经系统 pip --target）');
+                return true;
             }
         }
-        if (installed && edgeTtsInstalled(pythonPath)) {
-            console.log('[TTS] edge_tts 安装完成');
-            return true;
-        }
-    } else {
-        // 系统 Python：直接 pip install 到自身
-        if (runCmdQuiet(`"${pythonPath}" -m pip install edge-tts --disable-pip-version-check`) &&
-            edgeTtsInstalled(pythonPath)) {
-            console.log('[TTS] edge_tts 安装完成');
-            return true;
+    }
+
+    // 方式3：装到用户数据目录（resources/python 只读时可写），靠 PYTHONPATH 生效
+    const userSite = userPythonSite();
+    if (pipCmd) {
+        try { fs.mkdirSync(userSite, { recursive: true }); } catch (e) {}
+        if (pipInstallEdgeTts(pipCmd, true, userSite)) {
+            if (edgeTtsInstalledWithPath(pythonPath, userSite)) {
+                console.log('[TTS] edge_tts 安装完成（用户数据目录：' + userSite + '）');
+                return true;
+            }
         }
     }
-    console.warn('[TTS] edge_tts 自动安装失败，TTS 功能暂时降级不可用。可修复后重启应用重试。');
+
+    console.warn('[TTS] edge_tts 自动安装失败，TTS 功能暂时降级不可用。');
+    console.warn('[TTS] 手工修复：node scripts/install-python-deps.js  或  npm run setup');
     return false;
 }
 
-function initTTS() {
+// 带额外 PYTHONPATH 探测 edge_tts 是否可导入
+function edgeTtsInstalledWithPath(pythonPath, extraPath) {
+    try {
+        execFileSync(pythonPath, ['-c', 'import edge_tts'], {
+            stdio: 'ignore',
+            env: Object.assign({}, process.env, { PYTHONPATH: extraPath })
+        });
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+// 启动 Python 服务子进程时的环境变量：强制 UTF-8 标准流 + 注入用户可写站点目录
+// （用户数据目录里装过包时才能 import 到，例如 Program Files 只读场景）
+function pythonServiceEnv() {
+    const env = Object.assign({}, process.env, { PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' });
+    try {
+        const userSite = userPythonSite();
+        if (fs.existsSync(userSite)) {
+            env.PYTHONPATH = env.PYTHONPATH ? (userSite + path.delimiter + env.PYTHONPATH) : userSite;
+        }
+    } catch (e) {}
+    return env;
+}
+
+async function initTTS() {
     const pythonPath = getPythonPath();
     const scriptPath = getResourcePath('tts_service', 'tts_server.py');
-    
-    // 运行前确保 edge_tts 依赖已安装
-    ensureTTSDeps(pythonPath);
+
+    // 运行前确保 edge_tts 依赖已安装（异步执行，避免安装过程阻塞主进程启动）
+    await ensureTTSDeps(pythonPath);
 
     // Check if script exists
     if (!fs.existsSync(scriptPath)) {
@@ -1640,27 +2026,34 @@ function initTTS() {
     }
 
     ttsProcess = spawn(pythonPath, [scriptPath], {
-        stdio: ['pipe', 'pipe', 'pipe']
+        stdio: ['pipe', 'pipe', 'pipe'],
+        // 强制 Python 以 UTF-8 读写标准流（中文经 stdin 传给 edge-tts 时不会因
+        // Windows 本地代码页 cp936 解出非法代理字符），并注入用户可写的站点目录
+        env: pythonServiceEnv()
     });
-    
+
     ttsProcess.stderr.on('data', (data) => {
         console.log(`[TTS] ${data}`);
     });
-    
+
     ttsProcess.on('close', (code) => {
         console.log(`[TTS] Process exited, code: ${code}`);
         ttsProcess = null;
         ttsReady = false;
     });
-    
+
     ttsProcess.on('error', (err) => {
         console.error(`[TTS] Failed to start: ${err.message}`);
         ttsProcess = null;
         ttsReady = false;
     });
 
+    // 立刻挂载 stdout 监听（管道已建立即可接收，无需等待）
+    setupTTSListener();
+
     // Mark ready (wait a moment for Python to start)
     setTimeout(() => {
+        if (!ttsProcess) return;
         ttsReady = true;
         console.log('[TTS] Service ready');
     }, 1500);
@@ -1730,10 +2123,8 @@ function setupTTSListener() {
 
 // Start TTS
 function startTTS() {
-    initTTS();
-    if (ttsProcess) {
-        setTimeout(setupTTSListener, 2000);
-    }
+    // 依赖检查可能需要联网安装，异步进行；安装完成后再拉起 TTS 进程
+    initTTS().catch((e) => console.error('[TTS] 初始化失败：' + (e && e.message)));
 }
 
 // ===== IPC: TTS =====
@@ -1748,11 +2139,57 @@ function removeEmojiForTTS(text) {
     }
 }
 
+// 朗读前剔除括号（及其中的内容）：括号里的多半是旁白/动作描写/备注，念出来很奇怪。
+// 支持中英文常见成对括号，循环剥离以处理嵌套写法；只删括号块，保留括号外的正文。
+const TTS_BRACKET_PAIRS = [    ['（', '）'], ['(', ')'],
+    ['【', '】'], ['[', ']'],
+    ['〔', '〕'], ['〖', '〗'],
+    ['｛', '｝'], ['{', '}'],
+    ['《', '》'], ['〈', '〉'],
+    ['「', '」'], ['『', '』'],
+    ['<', '>'], ['＜', '＞']   // 尖括号：<think>、<MOOD:…> 等标记与旁白都不朗读
+];
+
+// 纯排版标签：只去掉标签、保留文字（不要把它们里面的内容当旁白删掉）
+const TTS_KEEP_CONTENT_TAGS = new Set(['b', 'i', 'u', 'em', 'strong', 'code', 'pre', 'br', 'p', 'span', 'div', 'hr', 'li', 'ul', 'ol', 'a', 'sub', 'sup', 'small', 'mark', 'del', 'ins', 's', 'font', 'table', 'tr', 'td', 'th', 'h1', 'h2', 'h3', 'h4']);
+
+function stripBracketedForTTS(text) {
+    let s = String(text == null ? '' : text);
+    if (!s) return '';
+    const esc = (ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // ① 纯排版标签只去标签、保留里面的文字（模型有时会吐 <b>…</b> 之类）
+    s = s.replace(/<\/?([A-Za-z][A-Za-z0-9_-]*)\s*\/?>/g, (m, tag) => (TTS_KEEP_CONTENT_TAGS.has(String(tag).toLowerCase()) ? '' : m));
+    // ② 其余成对标记连同内容一起删除：<think>推理过程</think>、<TOOL:...> 等
+    s = s.replace(/<([A-Za-z][A-Za-z0-9_:.-]*)\s*>[\s\S]*?<\/\1\s*>/g, '');
+    // ③ 单个标记本身删除：<MOOD:开心>、<STATE:睡觉>
+    s = s.replace(/<\/?[A-Za-z][A-Za-z0-9_:.-]*>/g, '');
+    // ④ 未闭合的标记：其后内容视为旁白，一并丢弃
+    s = s.replace(/<[A-Za-z][A-Za-z0-9_:.-]*>[\s\S]*$/, '');
+
+    for (let round = 0; round < 8; round++) {
+        const before = s;
+        for (const [open, close] of TTS_BRACKET_PAIRS) {
+            const o = esc(open), c = esc(close);
+            // [^open close]* —— 不跨越同类括号，避免把「（a）正文（b）」整段吞掉
+            s = s.replace(new RegExp(o + '[^' + o + c + ']*' + c, 'g'), '');
+        }
+        if (s === before) break;
+    }
+    // 兜底：成对括号被模型写歪（只有左括号）时，去掉落单的左括号本身
+    s = s.replace(/[（(【\[〔〖｛{《〈「『]/g, '');
+    return s.replace(/[ \t]{2,}/g, ' ').trim();
+}
+
 ipcMain.handle('speak-text', async (event, text, voice = 'zh-CN-XiaoxiaoNeural') => {
     if (!text) return null;
     try {
-        // Strip emoji before TTS (Edge TTS can't speak emoji, but Chinese text is preserved)
-        const clean = removeEmojiForTTS(text);
+        // 依次：去 emoji → 去括号内容（旁白/动作描写不朗读）
+        const clean = stripBracketedForTTS(removeEmojiForTTS(text));
+        if (!clean) {
+            console.log('[TTS] 去掉括号内容后为空，跳过合成');
+            return null;
+        }
         const audioB64 = await sendTTSRequest(clean, voice);
         return audioB64;
     } catch (error) {
@@ -1914,58 +2351,178 @@ ipcMain.on('stt-stream-end', () => {
 });
 
 // ===== AI 请求代理（主进程发起，避免渲染进程 SSL 网络问题） =====
-ipcMain.handle('ai-chat-request', async (event, { messages, model, maxTokens, temperature }) => {
-    if (!zhipuApiKey) throw new Error('智谱 API Key 未设置');
+// 候选模型 / 备选模型 / 重试策略统一由 ai-fallback.js 依据用户配置生成：
+//   当前提供商主模型 → 当前提供商备选模型 → 其它已配置的提供商（默认启用）
+// 智谱的默认备选序列（glm-4v-flash、glm-4v-plus）在 float.js 的配置默认值里给出，可在设置面板增删。
+let lastUsedZhipuModel = 'glm-4.6v-flash';
 
-    const body = JSON.stringify({
-        model: model || 'glm-4-flash',
-        messages: messages,
+// 归一化 OpenAI 兼容端点：无论填入完整 .../chat/completions 还是 base（如 http://localhost:8081/v1），
+// 都返回可用的 chat/completions 完整端点，避免"按 bat 提示填了 /v1 却 404"的问题。
+function normalizeChatUrl(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return '';
+    try {
+        const u = new URL(s);
+        if (/\/chat\/completions\/?$/.test(u.pathname)) return u.href;
+        return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, '')}/chat/completions`;
+    } catch (e) {
+        return s;
+    }
+}
+
+// ===== 单次模型调用（主进程侧 transport）=====
+// 发送前规范化消息数组：智谱 GLM 对 role / tool_call_id 校验很严，
+// 只要有一条消息缺 role，整轮请求就会 400「1214 角色信息不能为空」。
+// 这里兜底补齐合法 role（并按内容猜最合适的角色），同时记录一条告警方便定位来源。
+const VALID_CHAT_ROLES = new Set(['system', 'user', 'assistant', 'tool']);
+function sanitizeChatMessages(list, keepReasoning) {
+    if (!Array.isArray(list)) return [];
+    const out = [];
+    list.forEach((m, i) => {
+        if (!m || typeof m !== 'object') {
+            console.warn(`[主进程] 丢弃非法消息 #${i}: ${JSON.stringify(m)}`);
+            return;
+        }
+        let role = String(m.role == null ? '' : m.role).trim();
+        if (!VALID_CHAT_ROLES.has(role)) {
+            const hasToolCalls = Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
+            const guess = hasToolCalls ? 'assistant' : (m.tool_call_id ? 'tool' : 'user');
+            console.warn(`[主进程] 消息 #${i} 缺少合法 role（原值 ${JSON.stringify(m.role)}），已按 "${guess}" 兜底`);
+            role = guess;
+        }
+        const msg = { role };
+        // content 允许字符串或内容块数组；null/undefined 归一为空串（GLM 对 null 容忍但空串更稳）
+        msg.content = m.content === undefined || m.content === null ? '' : m.content;
+        if (role === 'assistant') {
+            if (Array.isArray(m.tool_calls) && m.tool_calls.length) msg.tool_calls = m.tool_calls;
+            // DeepSeek / 智谱：带 tools 的多轮必须完整回传 reasoning_content，否则 400
+            if (keepReasoning && m.reasoning_content) msg.reasoning_content = m.reasoning_content;
+        }
+        if (role === 'tool') {
+            if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
+            if (typeof msg.content !== 'string') msg.content = JSON.stringify(msg.content);
+        }
+        out.push(msg);
+    });
+    return out;
+}
+
+// 按候选所属提供商选择传输方式：
+//   zhipu  —— 沿用 https.request（忽略证书校验，解决 net-light -101 问题）
+//   其它   —— OpenAI 兼容 fetch（deepseek / 自定义中转站 / 本地 LLM）
+// 返回 {ok, data, status, message}，失败原因交给 ai-fallback 分类（重试 / 换备选）。
+async function callModelOnce(candidate, { messages, maxTokens, temperature, tools }) {
+    // 发送前规范化：补齐 role；带 tools 且该提供商要求回传 reasoning_content 时保留它
+    const hasTools = Array.isArray(tools) && tools.length > 0;
+    const safeMessages = sanitizeChatMessages(messages, AIFallback.shouldEchoReasoning(candidate.provider, hasTools));
+    const body = {
+        ...(candidate.model ? { model: candidate.model } : {}),
+        messages: safeMessages,
         max_tokens: maxTokens || 60,
-        temperature: temperature || 0.8
-    });
+        temperature: temperature === undefined ? 0.8 : temperature
+    };
 
-    return new Promise((resolve, reject) => {
-        const req = https.request({
-            hostname: 'open.bigmodel.cn',
-            path: '/api/paas/v4/chat/completions',
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${zhipuApiKey}`,
-                'Content-Length': Buffer.byteLength(body)
-            },
-            rejectUnauthorized: false,  // 忽略 SSL 证书验证，解决 net_error -101
-            timeout: 15000
-        }, (res) => {
-            let data = '';
-            res.on('data', (chunk) => { data += chunk; });
-            res.on('end', () => {
-                try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.error) {
-                        reject(new Error(parsed.error.message));
-                    } else {
-                        resolve(parsed);
-                    }
-                } catch (e) {
-                    reject(new Error(`JSON 解析失败: ${e.message}`));
-                }
+    // ----- 智谱：https.request + SSL 兼容 -----
+    if (candidate.provider === 'zhipu') {
+        const payload = JSON.stringify(body);
+        try {
+            const parsed = await new Promise((resolve, reject) => {
+                let u;
+                try { u = new URL(candidate.apiUrl); } catch (e) { u = new URL('https://open.bigmodel.cn/api/paas/v4/chat/completions'); }
+                const req = https.request({
+                    hostname: u.hostname,
+                    path: u.pathname + (u.search || ''),
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${candidate.apiKey}`,
+                        'Content-Length': Buffer.byteLength(payload)
+                    },
+                    rejectUnauthorized: false,  // 忽略 SSL 证书验证，解决 net_error -101
+                    timeout: 20000
+                }, (res) => {
+                    let data = '';
+                    res.on('data', (chunk) => { data += chunk; });
+                    res.on('end', () => {
+                        let json = null;
+                        try { json = JSON.parse(data); } catch (e) { return reject(new Error(`JSON 解析失败: ${e.message}`)); }
+                        if (res.statusCode < 200 || res.statusCode >= 300) {
+                            const msg = (json && json.error && json.error.message) || json.message || data.substring(0, 300);
+                            return reject(Object.assign(new Error(`HTTP ${res.statusCode}: ${msg}`), { httpStatus: res.statusCode }));
+                        }
+                        if (json && json.error) return reject(new Error(json.error.message || '智谱返回错误'));
+                        resolve(json);
+                    });
+                });
+                req.on('error', (e) => reject(e));
+                req.on('timeout', () => { req.destroy(); reject(new Error('请求超时')); });
+                req.write(payload);
+                req.end();
             });
-        });
+            if (!parsed || !parsed.choices || !parsed.choices[0]) return { ok: false, status: 0, message: '智谱无有效响应' };
+            return { ok: true, data: parsed, status: 200, message: '' };
+        } catch (e) {
+            return { ok: false, status: (e && e.httpStatus) || 0, message: (e && e.message) || String(e) };
+        }
+    }
 
-        req.on('error', (e) => {
-            console.error('[AI Request Error]', e.message);
-            reject(e);
+    // ----- OpenAI 兼容：deepseek / 自定义（中转站）/ 本地 -----
+    const base = candidate.provider === 'local' ? normalizeChatUrl(candidate.apiUrl) : candidate.apiUrl;
+    if (!base) return { ok: false, status: 0, message: 'API 地址未设置' };
+    const headers = { 'Content-Type': 'application/json' };
+    if (candidate.apiKey) headers['Authorization'] = `Bearer ${candidate.apiKey}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    try {
+        const resp = await fetch(base, {
+            method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal
         });
+        const text = await resp.text();
+        let data = null;
+        try { data = JSON.parse(text); } catch (e) { data = null; }
+        if (!resp.ok) {
+            const msg = (data && data.error && data.error.message) ? data.error.message : text.substring(0, 300);
+            return { ok: false, status: resp.status, message: `HTTP ${resp.status}: ${msg}` };
+        }
+        if (!data || !data.choices || !data.choices[0]) return { ok: false, status: resp.status, message: '无有效响应（缺少 choices）' };
+        return { ok: true, data, status: resp.status, message: '' };
+    } catch (e) {
+        const aborted = e && e.name === 'AbortError';
+        return { ok: false, status: 0, message: aborted ? '请求超时（30秒）' : ((e && e.message) || String(e)) };
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
 
-        req.on('timeout', () => {
-            req.destroy();
-            reject(new Error('请求超时'));
-        });
+ipcMain.handle('ai-chat-request', async (event, { messages, model, maxTokens, temperature, mode, tools } = {}) => {
+    const chain = AIFallback.buildChain(unifiedConfig, mode || 'chat');
+    // 调用方显式指定的模型优先作为首个候选（如陪伴窗口的陪伴模型）
+    const forced = String(model || '').trim();
+    if (forced && chain.length) {
+        chain[0] = Object.assign({}, chain[0], { model: forced, tag: 'primary' });
+    } else if (forced && !chain.length) {
+        const p = multimodalProvider || 'deepseek';
+        const cred = AIFallback.credentials(unifiedConfig, p);
+        if (cred.apiUrl) chain.push({ provider: p, model: forced, apiUrl: cred.apiUrl, apiKey: cred.apiKey, tag: 'primary' });
+    }
+    if (!chain.length) {
+        throw new Error('没有可用的模型候选（请检查 API 地址 / Key）');
+    }
 
-        req.write(body);
-        req.end();
+    const policy = AIFallback.retryPolicy(unifiedConfig);
+    const res = await AIFallback.runChain({
+        chain,
+        policy,
+        attempt: (candidate) => callModelOnce(candidate, { messages, maxTokens, temperature, tools }),
+        onAttempt: (info) => {
+            if (info.phase === 'retry') console.warn(`[ai-chat-request] ${info.candidate.model} 繁忙，重试 ${info.attempt}/${info.maxTries}`);
+        },
+        log: (level, msg) => (level === 'warn' ? console.warn(msg) : console.log(msg))
     });
+    if (!res.ok) throw new Error(res.error || 'AI 调用失败');
+    if (res.usedFallback) console.log(`[ai-chat-request] 使用备选模型成功: ${res.candidate.provider}/${res.candidate.model || '(默认)'} (${res.candidate.tag})`);
+    if (res.candidate && res.candidate.provider === 'zhipu' && res.candidate.model) lastUsedZhipuModel = res.candidate.model;
+    return res.data;
 });
 
 // 行为保持概率设置
@@ -2095,7 +2652,7 @@ ipcMain.on('set-sticker-pack', (event, packName) => {
 
 // 获取配置
 ipcMain.handle('get-multimodal-config', () => {
-    return { zhipuApiKey, multimodalEnabled, multimodalProvider, zhipuApiUrl };
+    return { zhipuApiKey, multimodalEnabled, multimodalProvider, zhipuApiUrl, localApiUrl, localApiKey, localModel, localCompanionModel, localMemoryModel, localVisionModel };
 });
 
 // 打开 img 文件夹（用户添加自定义贴图包）
@@ -2253,7 +2810,7 @@ function acceptDshMessage(payload) {
             petDshState.totals.tokens += inTok + outTok;
             petDshState.totals.cacheHit += hit;
             petDshState.totals.cacheMiss += miss;
-            // 花费按 deepseek-v4-flash 预估（命中 0.2 元/M，未命中 1 元/M，输出 3 元/M；仅供参考），
+            // 花费按 deepseek-flash 预估（命中 0.2 元/M，未命中 1 元/M，输出 3 元/M；仅供参考），
             // 空闲时段（北京时间非高峰）价格减半
             const rateF = ratePeriodNow().factor;
             petDshState.totals.cost += (hit / 1e6) * 0.2 * rateF + (miss / 1e6) * 1 * rateF + (outTok / 1e6) * 3 * rateF;
@@ -2604,6 +3161,64 @@ ipcMain.handle('capture-screen', async (event, recentMessages) => {
     }
 });
 
+// 仅截屏返回像素级感知哈希（不做 AI 分析），供陪伴模式判断屏幕变化。
+// 用 16x9 缩略图的灰度亮度与均值比较生成 144 位哈希：画面任何变化都会导致哈希改变，
+// 相比 base64 前缀（固定文件头）能正确反映画面内容变化。不触发任何 API 调用。
+ipcMain.handle('capture-screen-raw', async () => {
+    try {
+        const { desktopCapturer } = require('electron');
+        const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 160, height: 90 } });
+        if (!sources || sources.length === 0) return '';
+        const small = sources[0].thumbnail.resize({ width: 16, height: 9 });
+        const buf = small.toBitmap(); // BGRA，每像素 4 字节
+        if (!buf || buf.length < 16 * 9 * 4) return '';
+        const w = 16, h = 9;
+        const gray = [];
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const i = (y * w + x) * 4;
+                const b = buf[i], g = buf[i + 1], r = buf[i + 2];
+                gray.push(0.299 * r + 0.587 * g + 0.114 * b);
+            }
+        }
+        const avg = gray.reduce((a, b) => a + b, 0) / gray.length;
+        let hash = '';
+        for (let i = 0; i < gray.length; i++) hash += gray[i] >= avg ? '1' : '0';
+        return hash;
+    } catch (e) {
+        console.error('[capture-screen-raw] 错误:', e.message);
+        return '';
+    }
+});
+
+// 截屏返回 JPEG base64 缩略图（不做 AI 分析），供陪伴模式直接把图喂给多模态 thinking 模型。
+// 不触发任何 API 调用，也不写入聊天历史。
+ipcMain.handle('capture-screen-image', async () => {
+    try {
+        const { desktopCapturer } = require('electron');
+        const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 800, height: 450 } });
+        if (!sources || sources.length === 0) return '';
+        const b64 = sources[0].thumbnail.toJPEG(60).toString('base64');
+        return 'data:image/jpeg;base64,' + b64;
+    } catch (e) {
+        console.error('[capture-screen-image] 错误:', e.message);
+        return '';
+    }
+});
+
+// 系统空闲时间（秒）与用户活动事件，供陪伴模式数值体系感知键盘/鼠标活跃度。
+// powerMonitor.getSystemIdleTime() 返回自最后一次输入以来的秒数；调用方每 tick 询问，
+// 以 idle 秒数差异推断最近是否有键盘/鼠标活动（无需全局监听钩子）。
+ipcMain.handle('companion-activity', async () => {
+    try {
+        const idleSec = typeof powerMonitor.getSystemIdleTime === 'function' ? Math.max(0, Math.floor(powerMonitor.getSystemIdleTime())) : 0;
+        const idleMs = typeof powerMonitor.getSystemIdleTime === 'function' ? idleSec * 1000 : 0;
+        return { idleMs, idleSec };
+    } catch (e) {
+        return { idleMs: 0, idleSec: 0 };
+    }
+});
+
 // 保存聊天记录
 ipcMain.handle('save-chat-log', async (event, content) => {
     try {
@@ -2816,6 +3431,19 @@ function deepseekKey() {
     return (unifiedConfig && unifiedConfig.apiKey) || '';
 }
 
+// ===== 用户在设置面板自主选择的模型（按提供商 × 用途）=====
+// 字段命名与 float.js 保持一致：<provider>Model / <provider>CompanionModel / ...Model / ...VisionModel
+// 用途模型留空 → 回退该提供商的「聊天模型」；聊天模型也留空 → 用提供商默认模型。
+// 解析规则统一由 ai-fallback.js 提供，避免主进程与渲染进程出现两套逻辑。
+function configuredModel(provider, mode = 'chat') {
+    return AIFallback.resolveModel(unifiedConfig || {}, provider, mode);
+}
+
+// 某提供商的请求地址 / Key（自定义中转站与本地 LLM 使用各自独立字段）
+function configuredCredentials(provider) {
+    return AIFallback.credentials(unifiedConfig || {}, provider);
+}
+
 // 将图片 Buffer 上传到 DeepSeek Files API 并返回 file_id（手工构建 multipart，兼容无全局 FormData 的环境）
 function uploadImageToDeepSeekFiles(buffer, filename) {
     return new Promise((resolve, reject) => {
@@ -2875,103 +3503,301 @@ function uploadImageToDeepSeekFiles(buffer, filename) {
     });
 }
 
-// 统一的屏幕描述能力：按多模态提供商（deepseek / zhipu）路由
+// 统一的屏幕描述能力：按多模态提供商路由，并复用 ai-fallback 的重试 / 备选回退
+// 说明：DeepSeek 走 Files API（file_id 形式），仅在 DeepSeek 自身的视觉模型间回退；
+//       其余提供商（智谱 / 自定义中转站 / 本地）都用 image_url 形式，彼此之间也可互相回退。
 async function describeScreen(recentMessages) {
     const { desktopCapturer } = require('electron');
     const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1600, height: 900 } });
     if (!sources || sources.length === 0) throw new Error('未找到屏幕源');
     const source = sources[0];
     const provider = multimodalProvider || 'deepseek';
+    const policy = AIFallback.retryPolicy(unifiedConfig);
+    const cfg = unifiedConfig || {};
+    const systemText = '你是一个屏幕分析助手。请根据用户当前屏幕截图和最近的对话上下文，用一句话总结用户当前正在做什么。';
+    const userText = `最近的对话：${recentMessages || '无'}`;
 
-    if (provider === 'zhipu') {
-        if (!zhipuApiKey) throw new Error('智谱 API Key 未设置');
-        const base64 = source.thumbnail.toJPEG(70).toString('base64');
-        const zurl = (zhipuApiUrl || 'https://open.bigmodel.cn/api/paas/v4/chat/completions');
-        const zresp = await fetch(zurl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${zhipuApiKey}` },
-            body: JSON.stringify({
-                model: 'glm-4v-flash',
-                messages: [
-                    { role: 'system', content: '你是一个屏幕分析助手。请根据用户当前屏幕截图和最近的对话上下文，用一句话总结用户当前正在做什么。' },
-                    { role: 'user', content: [
-                        { type: 'text', text: `最近的对话：${recentMessages || '无'}` },
-                        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
-                    ] }
-                ],
-                max_tokens: 100,
-                temperature: 0.5
-            })
+    // ===== DeepSeek：file_id 形式，仅在同提供商视觉模型间回退 =====
+    if (provider === 'deepseek') {
+        if (!deepseekKey()) throw new Error('DeepSeek API Key 未设置');
+        const fileId = await uploadImageToDeepSeekFiles(source.thumbnail.toPNG(), 'screenshot.png');
+        const models = [];
+        const pushModel = (m) => { const v = String(m || '').trim(); if (v && models.indexOf(v) === -1) models.push(v); };
+        pushModel(configuredModel('deepseek', 'vision'));
+        AIFallback.fallbackModels(cfg, 'deepseek').forEach(pushModel);
+        if (!models.length) models.push('deepseek-flash');
+        const url = deepseekApiBase() + '/chat/completions';
+        const res = await AIFallback.runChain({
+            chain: models.map((m) => ({ provider: 'deepseek', model: m, apiUrl: url, apiKey: deepseekKey(), tag: 'vision' })),
+            policy,
+            attempt: async (candidate) => {
+                const ctrl = new AbortController();
+                const t = setTimeout(() => ctrl.abort(), 30000);
+                try {
+                    const resp = await fetch(candidate.apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${candidate.apiKey}` },
+                        body: JSON.stringify({
+                            model: candidate.model,
+                            messages: [{ role: 'user', content: [
+                                { type: 'file', file_id: fileId },
+                                { type: 'text', text: `请根据用户当前屏幕截图和最近的对话上下文，用一句话总结用户当前正在做什么，以及可能与对话相关的环境线索。\n${userText}` }
+                            ] }],
+                            max_tokens: 100,
+                            temperature: 0.5
+                        }),
+                        signal: ctrl.signal
+                    });
+                    const text = await resp.text();
+                    let data = null;
+                    try { data = JSON.parse(text); } catch (e) {}
+                    if (!resp.ok) {
+                        const msg = (data && data.error && data.error.message) ? data.error.message : text.substring(0, 300);
+                        return { ok: false, status: resp.status, message: `HTTP ${resp.status}: ${msg}` };
+                    }
+                    if (!data || !data.choices || !data.choices[0] || !data.choices[0].message) {
+                        return { ok: false, status: resp.status, message: (data && data.error && data.error.message) || 'DeepSeek 视觉模型无有效响应' };
+                    }
+                    return { ok: true, content: (data.choices[0].message.content || '').trim(), status: resp.status, message: '' };
+                } catch (e) {
+                    const aborted = e && e.name === 'AbortError';
+                    return { ok: false, status: 0, message: aborted ? '请求超时（30秒）' : ((e && e.message) || String(e)) };
+                } finally { clearTimeout(t); }
+            },
+            log: (level, msg) => (level === 'warn' ? console.warn('[describeScreen] ' + msg) : console.log('[describeScreen] ' + msg))
         });
-        const zdata = await zresp.json();
-        if (!zdata.choices || zdata.choices.length === 0) throw new Error('GLM-4V 无有效响应');
-        return zdata.choices[0].message.content.trim();
+        if (!res.ok) throw new Error(res.error || 'DeepSeek 视觉分析失败');
+        if (res.usedFallback) console.log(`[describeScreen] 视觉模型回退成功: ${res.candidate.model}`);
+        return res.content;
     }
 
-    // 默认 DeepSeek 视觉模型：上传截图到 Files API 获取 file_id 后分析
-    if (!deepseekKey()) throw new Error('DeepSeek API Key 未设置');
-    const fileId = await uploadImageToDeepSeekFiles(source.thumbnail.toPNG(), 'screenshot.png');
-    const dresp = await fetch(deepseekApiBase() + '/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${deepseekKey()}` },
-        body: JSON.stringify({
-            model: 'deepseek-v4-flash-vision-exp',
-            messages: [{ role: 'user', content: [
-                { type: 'file', file_id: fileId },
-                { type: 'text', text: `请根据用户当前屏幕截图和最近的对话上下文，用一句话总结用户当前正在做什么，以及可能与对话相关的环境线索。\n最近的对话：${recentMessages || '无'}` }
-            ] }],
-            max_tokens: 100,
-            temperature: 0.5
-        })
-    });
-    const ddata = await dresp.json();
-    if (!ddata.choices || !ddata.choices[0] || !ddata.choices[0].message) {
-        throw new Error((ddata.error && ddata.error.message) || 'DeepSeek 视觉模型无有效响应');
+    // ===== 其它提供商：image_url 形式，可在智谱 / 自定义 / 本地之间回退 =====
+    const base64 = source.thumbnail.toJPEG(70).toString('base64');
+    let chain = AIFallback.buildChain(cfg, 'vision').filter(c => c.provider !== 'deepseek');
+    if (!chain.length) {
+        // 用户可能没配 Key 但地址可用（本地 LLM）：直接以当前提供商为唯一候选
+        const cred = AIFallback.credentials(cfg, provider);
+        if (cred.apiUrl) {
+            chain = [{ provider, model: configuredModel(provider, 'vision'), apiUrl: cred.apiUrl, apiKey: cred.apiKey, tag: 'vision' }];
+        }
     }
-    return ddata.choices[0].message.content.trim();
+    const mkBody = (candidate, withImage) => ({
+        ...(candidate.model ? { model: candidate.model } : {}),
+        messages: [
+            { role: 'system', content: systemText },
+            { role: 'user', content: withImage
+                ? [{ type: 'text', text: userText }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }]
+                : userText }
+        ],
+        max_tokens: 100,
+        temperature: 0.5
+    });
+    const res = await AIFallback.runChain({
+        chain,
+        policy,
+        attempt: async (candidate) => {
+            const url = candidate.provider === 'local' ? normalizeChatUrl(candidate.apiUrl) : candidate.apiUrl;
+            const headers = { 'Content-Type': 'application/json' };
+            if (candidate.apiKey) headers['Authorization'] = `Bearer ${candidate.apiKey}`;
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), 30000);
+            try {
+                const resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(mkBody(candidate, true)), signal: ctrl.signal });
+                const text = await resp.text();
+                let data = null;
+                try { data = JSON.parse(text); } catch (e) {}
+                if (!resp.ok) {
+                    const msg = (data && data.error && data.error.message) ? data.error.message : text.substring(0, 300);
+                    return { ok: false, status: resp.status, message: `HTTP ${resp.status}: ${msg}` };
+                }
+                if (!data || !data.choices || !data.choices[0] || !data.choices[0].message) {
+                    return { ok: false, status: resp.status, message: '无有效响应' };
+                }
+                return { ok: true, content: (data.choices[0].message.content || '').trim(), status: resp.status, message: '' };
+            } catch (e) {
+                const aborted = e && e.name === 'AbortError';
+                return { ok: false, status: 0, message: aborted ? '请求超时（30秒）' : ((e && e.message) || String(e)) };
+            } finally { clearTimeout(t); }
+        },
+        log: (level, msg) => (level === 'warn' ? console.warn('[describeScreen] ' + msg) : console.log('[describeScreen] ' + msg))
+    });
+    if (res.ok) {
+        if (res.usedFallback) console.log(`[describeScreen] 视觉模型回退成功: ${res.candidate.provider}/${res.candidate.model || '(默认)'}`);
+        return res.content;
+    }
+
+    // ===== 本地 LLM 的最后降级：不带图，仅用对话上下文做纯文本描述（保持原有兼容行为）=====
+    if (provider === 'local' && chain.length) {
+        const candidate = chain[0];
+        const url = normalizeChatUrl(candidate.apiUrl);
+        const headers = { 'Content-Type': 'application/json' };
+        if (candidate.apiKey) headers['Authorization'] = `Bearer ${candidate.apiKey}`;
+        try {
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), 20000);
+            let resp;
+            try {
+                resp = await fetch(url, { method: 'POST', headers, body: JSON.stringify(mkBody(candidate, false)), signal: ctrl.signal });
+            } finally { clearTimeout(t); }
+            const text = await resp.text();
+            let data = null;
+            try { data = JSON.parse(text); } catch (e) {}
+            if (!resp.ok) {
+                const msg = (data && data.error && data.error.message) ? data.error.message : text.substring(0, 300);
+                throw new Error(`HTTP ${resp.status}: ${msg}`);
+            }
+            if (!data || !data.choices || !data.choices[0] || !data.choices[0].message) throw new Error('无有效响应');
+            console.log('[describeScreen] 本地视觉模型不支持看图，已降级为纯文本描述');
+            return (data.choices[0].message.content || '').trim();
+        } catch (e) {
+            console.warn('[describeScreen] 本地纯文本降级也失败:', e && e.message);
+        }
+    }
+    throw new Error(res.error || '屏幕分析失败');
 }
 
-// ===== 多模态聊天截图：上传 Files API + 本地缓存 + 删除 + 列表（供图像记忆使用）=====
-const screenshotCacheDir = path.join(app.getPath('userData'), 'screenshotCache');
+// ===== 多模态聊天截图：瞬态内存 + 按需持久化 + 删除（供图像记忆使用）=====
+// 设计要点（隐私/磁盘）：
+//   * 对话中每轮的截图一律**只留在内存**（transientScreenshots），绝不落盘；
+//   * 只有真正"进入记忆"的截图才由 multimodal-keep-image 落盘到 memoryImages/；
+//   * 未被记忆保留的截图在记忆总结结束后由 multimodal-release-images 释放：
+//     远程 DELETE /files/{file_id} + 丢弃内存副本；
+//   * 历史遗留的 screenshotCache（旧版本会写盘）在启动时按记忆引用关系清理。
+const screenshotCacheDir = path.join(app.getPath('userData'), 'screenshotCache');   // 旧版遗留目录，仅用于清理/兼容
+const memoryImagesDir = path.join(app.getPath('userData'), 'memoryImages');        // 进入记忆的图片才允许落盘
+
+// 本次会话的瞬态截图：fileId -> { buffer(JPEG), dataUrl, remote, ts }
+const transientScreenshots = new Map();
+// 截图压缩档位（默认与 GLM/多模态一致：1280x720 JPEG q60，约 100KB / ~1.2K tokens）
+const SCREENSHOT_MAX_WIDTH = 1280;
+const SCREENSHOT_MAX_HEIGHT = 720;
+const SCREENSHOT_JPEG_QUALITY = 60;
 
 function ensureScreenshotCacheDir() {
     try { if (!fs.existsSync(screenshotCacheDir)) fs.mkdirSync(screenshotCacheDir, { recursive: true }); } catch (e) {}
 }
 
-// 把已上传的截图写入本地缓存，返回 {imagePath, imageUrl}（ext 默认 png，兼容任意图片格式）
-function cacheScreenshot(fileId, buffer, ext = 'png') {
-    ensureScreenshotCacheDir();
+function ensureMemoryImagesDir() {
+    try { if (!fs.existsSync(memoryImagesDir)) fs.mkdirSync(memoryImagesDir, { recursive: true }); } catch (e) {}
+}
+
+// 把 nativeImage 压到统一档位（JPEG），既省 token 又避免大 PNG 占内存
+function compressScreenshot(nativeImg) {
+    const size = nativeImg.getSize();
+    let img = nativeImg;
+    if (size.width > SCREENSHOT_MAX_WIDTH || size.height > SCREENSHOT_MAX_HEIGHT) {
+        const scale = Math.min(SCREENSHOT_MAX_WIDTH / size.width, SCREENSHOT_MAX_HEIGHT / size.height);
+        img = nativeImg.resize({ width: Math.max(1, Math.round(size.width * scale)), height: Math.max(1, Math.round(size.height * scale)), quality: 'good' });
+    }
+    return img.toJPEG(SCREENSHOT_JPEG_QUALITY);
+}
+
+// 把已上传的图片写入本地文件（仅用于"进入记忆"的图片 / 手动添加的图片记忆）
+function persistImage(fileId, buffer, ext = 'jpg') {
+    ensureMemoryImagesDir();
     const safeName = String(fileId).replace(/[^a-zA-Z0-9-_]/g, '_') + '.' + String(ext).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-    const imagePath = path.join(screenshotCacheDir, safeName);
-    try { fs.writeFileSync(imagePath, buffer); } catch (e) { console.error('[cacheScreenshot]', e); }
+    const imagePath = path.join(memoryImagesDir, safeName);
+    try { fs.writeFileSync(imagePath, buffer); } catch (e) { console.error('[persistImage]', e); }
     let imageUrl = '';
     try { imageUrl = require('url').pathToFileURL(imagePath).href; } catch (e) {}
     return { imagePath, imageUrl };
 }
 
-// 截屏 -> 上传 Files API -> 本地缓存，返回 {fileId, imagePath, imageUrl}
+// 旧版本会把截图写进 screenshotCache；启动时按 petMemory.json 的引用关系清理孤儿文件
+function purgeLegacyScreenshotCache() {
+    try {
+        if (!fs.existsSync(screenshotCacheDir)) return;
+        let referenced = new Set();
+        try {
+            const items = loadMemoryFromFile();
+            (Array.isArray(items) ? items : []).forEach(m => {
+                if (m && m.imagePath) referenced.add(path.resolve(String(m.imagePath)).toLowerCase());
+            });
+        } catch (e) {}
+        let removed = 0;
+        for (const f of fs.readdirSync(screenshotCacheDir)) {
+            const full = path.join(screenshotCacheDir, f);
+            let stat = null;
+            try { stat = fs.statSync(full); } catch (e) { continue; }
+            if (!stat.isFile()) continue;
+            if (referenced.has(path.resolve(full).toLowerCase())) continue;
+            try { fs.unlinkSync(full); removed++; } catch (e) {}
+        }
+        console.log('[Main] 已清理遗留截图缓存文件：' + removed + ' 个（保留被记忆引用的图片）');
+    } catch (e) {
+        console.warn('[Main] 清理遗留截图缓存失败:', e && e.message);
+    }
+}
+
+// 截屏 -> 压缩 -> （DeepSeek 才上传拿 fileId）-> 仅存内存，返回 {fileId, dataUrl, bytes}
 ipcMain.handle('multimodal-upload-screenshot', async () => {
-    console.log('[Files] start screenshot upload | apiUrl:', (unifiedConfig && unifiedConfig.apiUrl) || '(empty)', '| derived base:', deepseekApiBase());
+    console.log('[Files] start screenshot capture | apiUrl:', (unifiedConfig && unifiedConfig.apiUrl) || '(empty)', '| derived base:', deepseekApiBase());
     try {
         const { desktopCapturer } = require('electron');
         const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1600, height: 900 } });
         if (!sources || sources.length === 0) throw new Error('未找到屏幕源');
-        if (!deepseekKey()) throw new Error('DeepSeek API Key 未设置');
         const source = sources[0];
-        const pngBuffer = source.thumbnail.toPNG();
-        console.log('[Files] screenshot captured, buffer bytes:', pngBuffer.length);
-        const fileId = await uploadImageToDeepSeekFiles(pngBuffer, `screenshot-${Date.now()}.png`);
-        console.log('[Files] upload success fileId:', fileId);
-        const { imagePath, imageUrl } = cacheScreenshot(fileId, pngBuffer);
-        console.log('[Files] local cache:', imagePath);
-        return { fileId, imagePath, imageUrl };
+        const jpegBuffer = compressScreenshot(source.thumbnail);
+        const dataUrl = 'data:image/jpeg;base64,' + jpegBuffer.toString('base64');
+        console.log('[Files] screenshot captured & compressed, jpeg bytes:', jpegBuffer.length);
+
+        // 只有 DeepSeek 需要 Files API 的 file_id；GLM/中转站/本地一律用 dataUrl（不落云端）
+        let fileId = '';
+        const provider = (unifiedConfig && unifiedConfig.multimodalProvider) || 'deepseek';
+        if (provider === 'deepseek' && deepseekKey()) {
+            fileId = await uploadImageToDeepSeekFiles(jpegBuffer, `screenshot-${Date.now()}.jpg`);
+            console.log('[Files] upload success fileId:', fileId);
+        }
+        const key = fileId || ('mem-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8));
+        transientScreenshots.set(key, { buffer: jpegBuffer, dataUrl, remote: !!fileId, ts: Date.now() });
+        // 注意：这里刻意不写盘（此前会 cacheScreenshot 到 screenshotCache）
+        // fileId 是对本次会话内该截图的唯一标识（DeepSeek 时即远端 file_id，其它提供商为本地内存 id）；
+        // remote=true 表示远端存在 file_id，可用于 {type:'file'} 内容块与远端删除。
+        return { fileId: key, remote: !!fileId, dataUrl, bytes: jpegBuffer.length, imagePath: '', imageUrl: '' };
     } catch (e) {
-        console.error('[Files] screenshot upload failed overall:', e && e.constructor && e.constructor.name, '| code:', e && e.code, '| msg:', e && e.message, '\n', e && e.stack);
+        console.error('[Files] screenshot capture failed:', e && e.constructor && e.constructor.name, '| code:', e && e.code, '| msg:', e && e.message, '\n', e && e.stack);
         throw e;
     }
 });
 
-// 手动"添加图片记忆"：弹出文件选择框 -> 上传 Files API 获取 file_id -> 本地缓存，返回 {fileId, imagePath, imageUrl}
+// 记忆总结判定"保留"时调用：把内存里的截图落盘，返回 {imagePath, imageUrl} 供记忆记录引用
+ipcMain.handle('multimodal-keep-image', async (event, fileId) => {
+    try {
+        const key = String(fileId || '');
+        const item = transientScreenshots.get(key);
+        if (!item) return { success: false, message: '该截图不在本次会话内存中（可能已被释放）' };
+        const { imagePath, imageUrl } = persistImage(key, item.buffer, 'jpg');
+        console.log('[Main] 图像记忆已落盘:', imagePath);
+        return { success: true, imagePath, imageUrl };
+    } catch (e) {
+        console.error('[multimodal-keep-image]', e);
+        return { success: false, message: e.message };
+    }
+});
+
+// 释放未被记忆保留的截图：远程删除（若是 DeepSeek）+ 丢弃内存副本
+ipcMain.handle('multimodal-release-images', async (event, fileIds) => {
+    const list = Array.isArray(fileIds) ? fileIds : [];
+    let remoteDeleted = 0, dropped = 0;
+    for (const raw of list) {
+        const key = String(raw || '');
+        if (!key) continue;
+        const item = transientScreenshots.get(key);
+        if (item && item.remote && deepseekKey()) {
+            try { await deleteDeepSeekFile(key); remoteDeleted++; } catch (e) { console.warn('[multimodal-release-images] 远程删除失败:', e && e.message); }
+        }
+        if (transientScreenshots.delete(key)) dropped++;
+    }
+    console.log('[Main] 释放未入记忆的截图：内存 ' + dropped + ' 张，远程 ' + remoteDeleted + ' 张');
+    return { success: true, dropped, remoteDeleted };
+});
+
+// 把已上传的截图写入本地缓存，返回 {imagePath, imageUrl}（保留：手动添加图片记忆等场景）
+function cacheScreenshot(fileId, buffer, ext = 'png') {
+    return persistImage(fileId, buffer, ext);
+}
+
+// 手动"添加图片记忆"：弹出文件选择框 -> 上传 Files API 获取 file_id -> 落盘，返回 {fileId, imagePath, imageUrl}
 ipcMain.handle('multimodal-upload-memory-image', async (event) => {
     try {
         const win = BrowserWindow.fromWebContents(event.sender);
@@ -2999,6 +3825,38 @@ ipcMain.handle('multimodal-upload-memory-image', async (event) => {
     } catch (e) {
         console.error('[Files] memory image upload failed:', e && e.stack, '| msg:', e && e.message);
         throw e;
+    }
+});
+
+// 选择「窗口背景」图片：只返回本地路径与 file:// URL，不上传、不复制。
+// 背景图会作为 CSS 变量（--win-bg-image）使用，所以这里加体积上限，
+// 避免超大图片拖慢毛玻璃的合成。
+ipcMain.handle('pick-bg-image', async (event) => {
+    try {
+        const win = BrowserWindow.fromWebContents(event.sender);
+        const dlgOpts = {
+            title: '选择窗口背景图片',
+            properties: ['openFile'],
+            filters: [{ name: '图片', extensions: ['jpg', 'jpeg', 'png', 'webp', 'avif', 'gif', 'bmp'] }]
+        };
+        const picked = win ? await dialog.showOpenDialog(win, dlgOpts) : await dialog.showOpenDialog(dlgOpts);
+        if (!picked || picked.canceled || !picked.filePaths || picked.filePaths.length === 0) {
+            return { canceled: true };
+        }
+        const filePath = picked.filePaths[0];
+        const MB_LIMIT = 12;
+        try {
+            const st = fs.statSync(filePath);
+            if (st.size > MB_LIMIT * 1024 * 1024) {
+                return { canceled: false, error: `图片超过 ${MB_LIMIT}MB（${(st.size / 1024 / 1024).toFixed(1)}MB），请先压缩再选` };
+            }
+        } catch (e) { /* 取不到大小就继续 */ }
+        const fileUrl = 'file:///' + filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+        console.log('[bg] picked background image:', filePath);
+        return { canceled: false, filePath, fileUrl, filename: path.basename(filePath) };
+    } catch (e) {
+        console.error('[bg] pick background image failed:', e && e.message);
+        return { canceled: true, error: (e && e.message) || '选择图片失败' };
     }
 });
 
@@ -3092,33 +3950,120 @@ ipcMain.handle('multimodal-list-files', async () => {
     catch (e) { console.error('[multimodal-list-files]', e); return { success: false, ids: [], data: [], message: e.message }; }
 });
 
+// 设置面板「🔄 拉取模型列表」：向服务商 /models 端点查询可选模型（渲染进程受 CORS 限制，统一走主进程）
+function modelListUrls(rawUrl) {
+    const out = [];
+    const push = (u) => { if (u && out.indexOf(u) === -1) out.push(u); };
+    const s = String(rawUrl || '').trim();
+    try {
+        const u = new URL(s);
+        const basePath = u.pathname.replace(/\/chat\/completions\/?$/, '').replace(/\/+$/, '');
+        push(`${u.protocol}//${u.host}${basePath}/models`);
+        // 常见：地址未带 /v1 时再补一份 /v1/models
+        if (!/\/v\d+$/.test(basePath)) push(`${u.protocol}//${u.host}${basePath}/v1/models`);
+        // 去掉版本段再试一次（部分服务商把模型列表放在根路径）
+        const trimmed = basePath.replace(/\/v\d+$/, '');
+        if (trimmed !== basePath) push(`${u.protocol}//${u.host}${trimmed}/models`);
+    } catch (e) {
+        push(s.replace(/\/+$/, '') + '/models');
+        push(s.replace(/\/chat\/completions\/?$/, '').replace(/\/+$/, '') + '/v1/models');
+    }
+    return out;
+}
+
+function extractModelIds(data) {
+    if (!data) return [];
+    const arr = Array.isArray(data.data) ? data.data
+        : Array.isArray(data.models) ? data.models
+        : Array.isArray(data) ? data : [];
+    const ids = [];
+    arr.forEach(m => {
+        const id = typeof m === 'string' ? m : (m && (m.id || m.name || m.model));
+        const v = String(id == null ? '' : id).trim();
+        if (v && ids.indexOf(v) === -1) ids.push(v);
+    });
+    return ids.sort();
+}
+
+ipcMain.handle('ai-list-models', async (event, { provider, apiKey, apiUrl } = {}) => {
+    try {
+        const p = String(provider || 'deepseek').toLowerCase();
+        const key = String(apiKey || '').trim();
+        let base = String(apiUrl || '').trim();
+        if (!base) {
+            base = p === 'zhipu' ? (zhipuApiUrl || 'https://open.bigmodel.cn/api/paas/v4/chat/completions')
+                : p === 'local' ? (localApiUrl || 'http://localhost:11434/v1/chat/completions')
+                : p === 'custom' ? ((unifiedConfig && unifiedConfig.customApiUrl) || '')
+                : ((unifiedConfig && unifiedConfig.apiUrl) || 'https://api.deepseek.com/v1/chat/completions');
+        }
+        if (!base) return { ok: false, models: [], message: '未填写 API 地址' };
+        const headers = {};
+        if (key) headers['Authorization'] = `Bearer ${key}`;
+        const candidates = modelListUrls(base);
+        let lastErr = '';
+        for (const url of candidates) {
+            try {
+                const ctrl = new AbortController();
+                const t = setTimeout(() => ctrl.abort(), 8000);
+                let resp;
+                try {
+                    resp = await fetch(url, { method: 'GET', headers, signal: ctrl.signal });
+                } finally { clearTimeout(t); }
+                if (!resp.ok) { lastErr = `HTTP ${resp.status}`; continue; }
+                const data = await resp.json().catch(() => null);
+                const models = extractModelIds(data);
+                if (models.length) {
+                    console.log(`[ai-list-models] ${p} -> ${url} (${models.length} 个模型)`);
+                    return { ok: true, models, source: url };
+                }
+                lastErr = '响应中没有模型列表';
+            } catch (e) {
+                lastErr = (e && e.name === 'AbortError') ? '请求超时' : ((e && e.message) || String(e));
+            }
+        }
+        console.warn('[ai-list-models] 未获取到模型列表:', p, lastErr);
+        return { ok: false, models: [], message: lastErr || '未找到模型列表接口' };
+    } catch (e) {
+        console.error('[ai-list-models]', e);
+        return { ok: false, models: [], message: (e && e.message) || String(e) };
+    }
+});
+
 // 设置面板"测试 API 连接"：用当前填写的 Key/地址发起一次最小聊天请求，验证地址、鉴权与模型是否可用
-ipcMain.handle('ai-test-api', async (event, { provider, apiKey, apiUrl } = {}) => {
+ipcMain.handle('ai-test-api', async (event, { provider, apiKey, apiUrl, model } = {}) => {
     const start = Date.now();
     const latencyNow = () => Date.now() - start;
     try {
         const p = String(provider || 'deepseek').toLowerCase();
         const key = String(apiKey || '').trim();
-        const url = String(apiUrl || '').trim();
-        if (!key) return { ok: false, latencyMs: latencyNow(), message: '未填写 API Key' };
-        if (!url) return { ok: false, latencyMs: latencyNow(), message: '未填写 API 地址' };
+        let url = String(apiUrl || '').trim();
+        if (p === 'local') {
+            if (!url) url = localApiUrl || 'http://localhost:11434/v1/chat/completions';
+            url = normalizeChatUrl(url);
+            if (!url) return { ok: false, latencyMs: latencyNow(), message: '未填写 API 地址' };
+        } else if (p === 'custom') {
+            if (!url) return { ok: false, latencyMs: latencyNow(), message: '未填写 API 地址' };
+            url = normalizeChatUrl(url); // 中转站：base 地址自动补 /chat/completions
+        } else {
+            if (!key) return { ok: false, latencyMs: latencyNow(), message: '未填写 API Key' };
+            if (!url) return { ok: false, latencyMs: latencyNow(), message: '未填写 API 地址' };
+        }
 
-        const model = p === 'zhipu' ? 'glm-4-flash' : 'deepseek-v4-flash';
+        const modelName = String(model || '').trim() || configuredModel(p, 'chat');
+        const headers = { 'Content-Type': 'application/json' };
+        if (key) headers['Authorization'] = `Bearer ${key}`;
+        const bodyPayload = { messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, temperature: 0.2 };
+        if (modelName) bodyPayload.model = modelName;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 20000);
-        console.log('[ai-test-api] ->', url, '| model:', model, '| key present:', !!key);
+        console.log('[ai-test-api] ->', url, '| model:', modelName || '(服务端默认)', '| key present:', !!key);
 
         let resp;
         try {
             resp = await fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-                body: JSON.stringify({
-                    model: model,
-                    messages: [{ role: 'user', content: 'ping' }],
-                    max_tokens: 1,
-                    temperature: 0.2
-                }),
+                headers: headers,
+                body: JSON.stringify(bodyPayload),
                 signal: controller.signal
             });
         } finally {
@@ -3136,7 +4081,7 @@ ipcMain.handle('ai-test-api', async (event, { provider, apiKey, apiUrl } = {}) =
         if (!data || !data.choices || !data.choices[0]) {
             return { ok: false, status: resp.status, latencyMs: latencyNow(), message: '响应异常（缺少 choices）' };
         }
-        return { ok: true, status: resp.status, latencyMs: latencyNow(), model: model, message: '连接成功，API Key 有效' };
+        return { ok: true, status: resp.status, latencyMs: latencyNow(), model: modelName || '(服务端默认)', message: key ? '连接成功，API Key 有效' : '连接成功' };
     } catch (e) {
         const aborted = e && e.name === 'AbortError';
         console.error('[ai-test-api] error:', e);
@@ -3144,10 +4089,18 @@ ipcMain.handle('ai-test-api', async (event, { provider, apiKey, apiUrl } = {}) =
     }
 });
 
-// 删除本地缓存截图
+// 删除本地图片文件（图像记忆删除时调用）。
+// 只允许删除我们自己的两个目录下的文件，避免被渲染进程传入任意路径误删。
 ipcMain.handle('multimodal-delete-cache', async (event, imagePath) => {
     try {
-        if (imagePath && fs.existsSync(imagePath)) { fs.unlinkSync(imagePath); return { success: true }; }
+        if (!imagePath) return { success: false, message: '未提供路径' };
+        const target = path.resolve(String(imagePath)).toLowerCase();
+        const allowed = [screenshotCacheDir, memoryImagesDir].map(d => path.resolve(d).toLowerCase() + path.sep);
+        if (!allowed.some(prefix => target.startsWith(prefix))) {
+            console.warn('[multimodal-delete-cache] 拒绝删除允许目录之外的文件:', imagePath);
+            return { success: false, message: '路径不在允许的图片目录内' };
+        }
+        if (fs.existsSync(imagePath)) { fs.unlinkSync(imagePath); return { success: true }; }
         return { success: false, message: '缓存文件不存在' };
     } catch (e) {
         console.error('[multimodal-delete-cache]', e);
@@ -3309,39 +4262,6 @@ async function executeToolHandler(toolName, args) {
                     return { success: true, data: parseInt(result) || 50 };
                 }
                 return { success: true, data: 50 };
-            }
-
-            // ===== 截屏 =====
-            case 'screenshot': {
-                const { exec } = require('child_process');
-                const desktopPath = path.join(require('os').homedir(), 'Desktop');
-                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-                const filename = `screenshot_${timestamp}.png`;
-                const filePath = path.join(desktopPath, filename);
-                const platform = process.platform;
-                if (platform === 'win32') {
-                    // Windows 截图工具
-                    await new Promise((resolve) => {
-                        exec(`powershell -c "Add-Type -AssemblyName System.Windows.Forms;[System.Windows.Forms.SendKeys]::SendWait('{PRTSC}')"`, () => resolve());
-                    });
-                    return { success: true, data: '截图已保存到剪贴板（需手动粘贴到画图工具保存）' };
-                } else if (platform === 'darwin') {
-                    await new Promise((resolve, reject) => {
-                        exec(`screencapture -x "${filePath}"`, (e) => e ? reject(e) : resolve());
-                    });
-                } else {
-                    // Linux: 使用 import (ImageMagick) 或 gnome-screenshot
-                    try {
-                        await new Promise((resolve, reject) => {
-                            exec(`gnome-screenshot -f "${filePath}"`, (e) => e ? reject(e) : resolve());
-                        });
-                    } catch (e) {
-                        await new Promise((resolve, reject) => {
-                            exec(`import -window root "${filePath}"`, (e) => e ? reject(e) : resolve());
-                        });
-                    }
-                }
-                return { success: true, data: `截图已保存到桌面：${filename}` };
             }
 
             // ===== 系统信息 =====
@@ -3955,72 +4875,6 @@ async function executeToolHandler(toolName, args) {
                 }
             }
 
-            // ===== 屏幕捕获（调用智谱 GLM-4V） =====
-            case 'capture_screen': {
-                try {
-                    const desc = await describeScreen();
-                    return { success: true, data: desc };
-                } catch (e) {
-                    console.error('[capture_screen] 错误:', e);
-                    return { success: false, error: e.message || '屏幕分析失败' };
-                }
-            }
-
-            // ===== 图像识别（DeepSeek Files API 上传截图 + 视觉模型） =====
-            case 'vision': {
-                const { question } = args || {};
-                if (!deepseekKey()) return { success: false, error: 'DeepSeek API Key 未设置' };
-                const q = (question && String(question).trim()) ? String(question).trim() : '请描述当前屏幕内容';
-                const { desktopCapturer } = require('electron');
-                const sources = await desktopCapturer.getSources({
-                    types: ['screen'],
-                    thumbnailSize: { width: 1600, height: 900 }
-                });
-                if (!sources || sources.length === 0) return { success: false, error: '未找到屏幕源' };
-                const pngBuffer = sources[0].thumbnail.toPNG();
-
-                let fileId;
-                try {
-                    fileId = await uploadImageToDeepSeekFiles(pngBuffer, 'screenshot.png');
-                } catch (e) {
-                    console.error('[vision] 图片上传失败:', e);
-                    return { success: false, error: e.message || '图片上传失败' };
-                }
-
-                let visionResponse, visionData;
-                try {
-                    visionResponse = await fetch(deepseekApiBase() + '/chat/completions', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${deepseekKey()}`
-                        },
-                        body: JSON.stringify({
-                            model: 'deepseek-v4-flash-vision-exp',
-                            messages: [{
-                                role: 'user',
-                                content: [
-                                    { type: 'file', file_id: fileId },
-                                    { type: 'text', text: q }
-                                ]
-                            }]
-                        })
-                    });
-                    visionData = await visionResponse.json();
-                } catch (e) {
-                    console.error('[vision] 视觉模型请求失败:', e);
-                    return { success: false, error: '视觉模型请求失败: ' + (e.message || '') };
-                }
-
-                if (!visionResponse.ok || visionData.error) {
-                    return { success: false, error: (visionData.error && visionData.error.message) || `视觉模型调用失败 (${visionResponse.status})` };
-                }
-                if (visionData.choices && visionData.choices[0] && visionData.choices[0].message) {
-                    return { success: true, data: visionData.choices[0].message.content };
-                }
-                return { success: false, error: '视觉模型无有效响应' };
-            }
-
             // ===== 图像生成（调用智谱 CogView，正确格式：仅 model + prompt） =====
             case 'generate_image': {
                 const { prompt } = args || {};
@@ -4192,6 +5046,8 @@ app.whenReady().then(() => {
     loadUnifiedConfig();
     // 把统一配置回灌到主进程运行状态，避免 index/浮窗启动时广播旧默认值把设置改回默认
     hydrateRuntimeFromUnified();
+    // 清理旧版本遗留的截图缓存（新版本瞬态截图只驻内存、不落盘）
+    purgeLegacyScreenshotCache();
 
     // DSH 联动（deepseek-harness 插件通信 / 任务面板 / 余额）
     startDshLink();
