@@ -22,8 +22,9 @@
 - [运行要求](#运行要求)
 - [打包发布](#打包发布)
 - [开发说明](#开发说明)
+- [启动与运行问题排查](#启动与运行问题排查)
+- [界面与设置面板](#界面与设置面板)
 - [浮窗物理与渲染对位（踩坑记录）](#浮窗物理与渲染对位踩坑记录)
-
 ## 快速开始
 
 > 从 GitHub 克隆后，体积较大的二进制资源（嵌入式 Python 运行时 zip、STT 模型 zip）
@@ -35,16 +36,27 @@
 #    → 引导 pip（用内置 ensurepip / get-pip.py）→ 安装 TTS/STT 依赖(edge-tts/vosk) → 解压 STT 模型
 npm install
 
-# 2. 开发运行
+# 2. 开发运行（推荐）
+#    走 start.js 启动器：会先清掉 ELECTRON_RUN_AS_NODE（某些宿主/终端会注入它，
+#    导致 electron 退化成纯 Node 而秒退），再探测 Chromium 沙箱是否可用，
+#    不可用才自动补 --no-sandbox。日志原样打到当前终端。
 npm start
 
 # 3. 一键打包 Windows 安装包（输出到 dist/，也会兜底下载并安装依赖）
 npm run build
 
-# 其他打包命令
-npm run dist    # 同 build，仅打包
-npm run rebuild # 先清空 dist 再打包
+# 其他命令
+npm run start:raw   # 等价于原来的 `electron .`（终端环境干净时用它）
+npm run dist        # 同 build，仅打包
+npm run rebuild     # 先清空 dist 再打包
+npm run sync        # 把 float.js / float.css 等同步进 float.html 的内联块（改完前端务必跑）
+npm run sync:check  # 只校验内联内容与源码是否一致
 ```
+
+> **启动不了先看这条**：若 `npm start` 一闪而过、什么都不打印，请依次检查
+> 1）`echo %ELECTRON_RUN_AS_NODE%` 是否为空（非空说明终端被注入了这个变量，改用 `npm start` 即可，它会自己清掉）；
+> 2）用 `npm run start:raw` 交叉验证——若它崩在沙箱（退出码 `-2147483645` / `0x80000003`），说明本机 Chromium 沙箱不可用，`npm start` 会自动降级。
+> 详见 [启动与运行问题排查](#启动与运行问题排查)。
 
 工具链要求（`npm install` 时会自动检测）：**Node.js 14+**（建议 18+）、**npm**。
 
@@ -54,8 +66,9 @@ npm run rebuild # 先清空 dist 再打包
 
 ```
 electron/
-├── main.js                      # Electron 主进程：窗口管理、IPC、TTS/STT 子进程管理、AI 请求代理、Agent 工具系统
+├── main.js                      # Electron 主进程：窗口管理、IPC、配置落盘、TTS/STT 子进程管理、AI 请求代理、Agent 工具系统
 ├── preload.js                   # 预加载脚本：通过 contextBridge 暴露 electronAPI，桥接渲染进程与主进程
+├── start.js                     # 开发启动器（npm start 入口）：清理 ELECTRON_RUN_AS_NODE + 沙箱探测降级
 ├── index.html                   # 「家里」次要窗口：房子 + 桌宠 + 聊天面板 + 家里专属设置（由浮窗"回家"唤起）
 ├── float.html                   # 默认启动窗口：桌宠游荡模式 + 聊天 + 设置面板（通过 ?mode=chat / ?mode=settings 区分）
 ├── companion.html               # 陪伴模式窗口：麦克风图标 + 语音对话气泡 + 立绘
@@ -63,15 +76,17 @@ electron/
 │
 ├── voice.js                     # 浏览器端语音管理模块（VoiceManager 类）：Web Speech API TTS/STT
 ├── companion.js                 # 陪伴模式逻辑：录音、VAD、智谱 AI 对话、屏幕感知、主动搭话
-├── float.js                     # 浮窗逻辑：游荡/抛物线/重力移动、聊天、TTS 朗读、设置面板
+├── float.js                     # 浮窗逻辑：状态机/游荡/重力移动、聊天、TTS 朗读、设置面板、窗口材质与外观
+├── ai-fallback.js               # 统一的候选链 / 重试 / 备选模型回退编排（主进程与渲染进程共用）
 ├── cookie.js                    # 饼干逻辑：拖拽移动、投喂交互、动画
 ├── companion.css                # 陪伴模式样式
-├── float.css                    # 浮窗/聊天窗口样式
+├── float.css                    # 浮窗/聊天/设置窗口样式（含由 sync-inline 注入的增量段）
 ├── cookie.css                   # 饼干窗口样式
 │
 ├── css/
 │   ├── index.css                # 主窗口样式（设置面板、聊天框、状态栏、房子等）
-│   └── grid-editor.css          # 网格编辑器样式
+│   ├── grid-editor.css          # 网格编辑器样式
+│   └── float-ui-additions.css   # 浮窗 UI 增量样式唯一来源（令牌 / 风格语言 / 窗口背景 / 动作条 / 面板列布局）
 │
 ├── js/
 │   ├── index.js                 # 主窗口核心逻辑：状态系统、聊天、AI 对话、设置管理、记忆系统、网格交互
@@ -98,6 +113,9 @@ electron/
 │       └── vosk-model-small-cn-0.22.zip  # 中文语音识别模型（需解压）
 │
 ├── scripts/
+│   ├── sync-inline.mjs          # ★ 前端改动后必跑：同步内联 JS 块 + CSS 托管段，并校验一致性
+│   ├── inline-float.mjs         # 旧脚本：只同步内联 JS（已被 sync-inline 取代，保留兼容）
+│   ├── inline-float-css.mjs     # 旧脚本：只同步 CSS 托管段（同上）
 │   ├── extract-python.js        # 构建时解压嵌入式 Python 压缩包
 │   ├── build.js                 # 一键打包 Windows 安装包的构建脚本
 │   ├── bootstrap.js             # 环境引导（检测/下载嵌入式运行时等）
@@ -382,7 +400,7 @@ electron/
 
 ### 媒体与 AI
 
-- `capture_screen`：截图 + 智谱 GLM-4V 分析
+- `vision`：截图 + 视觉模型（deepseek-flash）分析，回答针对屏幕的提问（已合并原 `capture_screen`）
 - `generate_image`：智谱 CogView 图像生成
 - `run_python`：执行临时 Python 脚本
 
@@ -601,12 +619,133 @@ npm run build   # 生成 dist/ 目录下的 NSIS 安装包
 
 **为什么"只加了设置、没改数值"问题就自愈**：新增设置滑块并重新加载浮窗时，`applySavedFloatConfig()` 后紧跟着的 `updateWindowSize()` 一起生效，把第 1 条（容器/窗口尺寸初始化）修复了，物理碰撞随之回到正确尺寸，因此即使滑块保持默认值，显示也恢复正常。
 
+## 启动与运行问题排查
+
+> 这一节是**实战踩坑记录**，本机（Windows 10 19044 + 受限终端）逐一验证过。特征是：`npm start` 一闪而过、什么都不打印。
+
+### 症状 A：`app` 为 undefined
+
+```
+[Main] 启动失败：当前进程没有拿到 Electron 运行时（app 为 undefined）。
+```
+
+**原因**：环境变量 `ELECTRON_RUN_AS_NODE=1` 被宿主/终端注入到子进程环境里。它会让 `electron` 退化成**纯 Node**，此时 `require('electron')` 只返回一个字符串（electron.exe 的路径），`app.commandLine` 直接抛 TypeError。
+
+**难点**：这个变量在 shell 里 `Get-ChildItem Env:` 看不到，但**每个子进程都能读到**（说明是在进程创建时注入的，不是继承自 shell）。
+
+**判断**：`node -e "console.log(process.env.ELECTRON_RUN_AS_NODE)"` → 输出 `1` 即命中。
+
+**处理**：`npm start`（走 `start.js`）会在 spawn 之前删掉它；要自己排查可用
+
+```cmd
+set ELECTRON_RUN_AS_NODE=
+npm run start:raw
+```
+
+### 症状 B：Chromium 沙箱崩溃
+
+```
+exit code -2147483645      # = 0x80000003，系统断点异常
+```
+
+**原因**：受限环境（远程桌面 / 容器 / 安全软件拦截）里 Chromium 沙箱初始化失败，进程在 JS 执行前就被终止，所以**没有任何日志**。
+
+**验证**（本机逐项实测过，只有最后一项有效）：
+
+| 开关 | 结果 |
+|---|---|
+| 默认（不传） | 崩 |
+| `--disable-gpu` / `--disable-gpu-compositing` / `--disable-gpu-sandbox` | 崩 |
+| `--in-process-gpu` / `--use-gl=swiftshader` | 崩 |
+| **`--no-sandbox`** | **可用** |
+
+**处理**：`npm start` 会自动探测：带沙箱跑一次 `electron.exe --version`，非零退出即判定不可用，自动补 `--no-sandbox --disable-gpu-sandbox`。沙箱正常的机器上它**不会**添加任何开关。
+
+> 想确认某台机器的真实情况，最直接的一条：
+> ```cmd
+> node_modules\electron\dist\electron.exe --version
+> ```
+> 输出 `v31.0.0` = 正常；输出 `v20.x.x`（Node 版本号）= 命中了症状 A；无输出且退出码 `-2147483645` = 命中了症状 B。
+
+### 症状 C：设置改了保存不了
+
+**原因**：主进程 `fs.writeFileSync` 对 `%APPDATA%\pet-app\petAppConfig.json` 报 `EPERM`（受限环境会被 OS 层拦）。旧代码是 `try { … } catch {}` **静默失败**，所以表现为"设置一改就丢"。
+
+**处理**：现在写入后会**回读校验**，不一致就落到备用路径 `<应用目录>/petAppConfig.json`；启动时按**修改时间取最新的一份**。日志里会明确出现：
+
+```
+[Main] 配置写入失败: EPERM ...
+[Main] 主配置路径不可写，已改用备用路径: ...
+```
+
+### 症状 D：改了 `float.js` 但界面没反应
+
+`float.html` 是唯一把渲染脚本 **base64 内联**进 HTML 的页面（`<script src="data:application/javascript;base64,...">`），`<style>` 块也是 `float.css` 的一份压缩副本。只改源文件、不重新内联，运行的就是旧代码。
+
+**处理**：改完跑一次 `npm run sync`（= `node scripts/sync-inline.mjs`）。它会按固定顺序同步「内联 JS → CSS 托管段」，并逐项校验；`npm run sync:check` 只校验不写。
+
+> 顺序很重要：CSS 那一步会整份写回 `float.html`，先 JS 后 CSS 才不会互相覆盖。所以**不要**再单独跑 `inline-float.mjs` / `inline-float-css.mjs`。
+
+## 界面与设置面板
+
+### 设置面板信息架构
+
+设置界面是**一级页 → 分组 → 设置项**三层，左侧导航固定 6 个一级页：
+
+| 一级页 | 包含分组（`data-gk`） |
+|---|---|
+| 🎨 外观主题 | `theme` `material` `style` |
+| 🐾 桌宠与浮窗 | `window` `pet` `sticker` |
+| 💬 交互与语音 | `persona` `voice` |
+| 🤖 AI 与工具 | `ai` |
+| 💾 记忆与数据 | `member` `display` `companion` `launch` `home` `exit` |
+| ⚙️ 高级 | `chain` `state` `dsh` |
+
+- 归属关系只在 `float.js` 的 `SETTINGS_PAGES` 里声明一次；**没登记的 `data-gk` 自动落到「高级」页**，不会漏
+- 顶部全局搜索跨页过滤、命中标黄、自动滚到第一处；清空后回到当前页
+- 内容区按 `data-col` 分栏：短分组并排（`half`），长分组占满整行（`full`）
+- 新增设置分组的步骤：在 `float.html` 加一个 `<div class="sb-group" data-gk="xxx">` → 在 `SETTINGS_PAGES` 对应页的数组里加上 `'xxx'` → 不需要动导航代码
+
+### 外观与材质
+
+「外观主题」页控制的是**窗口自己的背景**（`.win-bg` 这一层），**不是电脑桌面**：面板用 `backdrop-filter` 取它的颜色做毛玻璃，所以毛玻璃的作用范围严格限制在窗口内。
+
+| 维度 | 取值 | 说明 |
+|---|---|---|
+| 主色 | 6 色 × 5 套主题色板 | 只改 `--brand` 系列 |
+| 窗口背景 | 5 套预设渐变 / 自选本机图片 | 图片只读本地路径，不上传 |
+| 面板透明度 | 40% ~ 100% | 分三档：面板 > 卡片 > 标题栏 |
+| 毛玻璃模糊 | 0 ~ 40px | 取的是窗口背景的颜色 |
+| 背景虚化 / 饱和度 / 可读性蒙版 | — | 与毛玻璃是两个独立层次 |
+| 界面风格 | Fluent / Apple / Metro / Clay / Brutal | 只覆盖圆角·描边·阴影·字重·缓动 6 个令牌，新增一种风格 ≈ 10 行 CSS |
+| 深色模式 | 开 / 关 | 只翻中性色令牌，与主色正交 |
+
+### 浮窗（桌宠模式）竖直堆叠
+
+自窗口底边往上，四段互不遮挡；窗口**下边缘贴底**，所以"变高"就是**上边缘上移**：
+
+```
+贴图上方留白        DSH 任务面板（面板隐藏时这一整段收起来 = 上边缘下移）
+桌宠贴图            ← 「贴图与按钮间距」控制它与按钮的距离
+底部四个按钮        ← 「按钮大小」控制尺寸（动作条高度 = 按钮大小 + 6px）
+状态条              ← DSH 连接 / 硬件监控 / 峰谷时段，0 ~ 40px
+```
+
+相关设置项：`小窗口桌宠大小`、`按钮大小`、`贴图与按钮间距`、`贴图上方留白`、`小窗口移动模式`。这几个值任一改动都会触发浮窗立即重排（走 `config-updated` 广播 → `updateWindowSize()`）。
+
+> ⚠️ 一致性要求：`float.js` 里的 `PET_STAT_H` / `PET_STAT_ACTION_GAP` / `PET_ACTION_H`（由 `petActionH()` 派生）/ `PET_ACTION_PET_GAP` 必须与 `css/float-ui-additions.css` 中 `.float-pet`、`.pet-action-bar`、`.pet-stat-bar` 的 `calc()` 保持一致，否则贴图会与按钮重叠。
+
+> ⚠️ 本版 Electron（31）**不支持**在 `calc()` 里混用 `vh` 与 `var()`：`calc(100vh - var(--a) - var(--b))` 会解析失败并把 `max-height` 算成 0。DSH 任务面板的定位与高度上限因此全部在 JS 里算成像素值。
+
 ### 调试
 
 - 开发者模式：设置面板中启用，可双击 Ctrl 生成测试饼干、查看和编辑 AI 提示词
 - 全局快捷键：`Ctrl+Shift+C` 在开发者模式下生成饼干
 - 日志：主进程控制台输出 `[Main]`、`[TTS]`、`[STT]` 等标签日志，渲染进程输出 `[Voice]`、`[Float]` 等标签日志
 - 用户数据路径：启动时打印 `userData`、`localStorage`、`petMemory.json` 路径
+- 配置落盘路径：正常为 `%APPDATA%\pet-app\petAppConfig.json`，被拦时回落到应用目录并打印提示
+- 排查外观问题时：每次应用令牌都会打印 `[appearance] apply style=… dark=… glass=… preset=… alpha=… blur=…`，可直接看出是哪一层没生效
+- UI 自检（可选）：设置 `PET_APP_DEBUG_PORT=9223` 或传 `--remote-debugging-port=9223` 后，可用 CDP 连接正在运行的应用抓取真实窗口截图与计算样式
 
 ## ☕ 请作者喝一杯咖啡
 
