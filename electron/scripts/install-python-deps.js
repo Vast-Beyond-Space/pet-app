@@ -88,15 +88,18 @@ function findEmbeddedPip() {
         log(`使用嵌入式 Python 运行时：${PYTHON_EXE}`);
         return `"${PYTHON_EXE}" -m pip`;
     }
-    // 未内置 pip：先用内置 ensurepip，失败再用 get-pip.py（需同步下载）
+    // 未内置 pip：先用内置 ensurepip，失败再用 get-pip.py（嵌入式 Python 通常没有
+    // ensurepip，get-pip.py 才是真正可靠的引导路径）
     log('嵌入式 Python 未发现 pip，尝试引导安装...');
     if (runOut(`"${PYTHON_EXE}" -m ensurepip --version`)) {
         log('使用内置 ensurepip 引导 pip...');
         run(`"${PYTHON_EXE}" -m ensurepip --upgrade`);
     } else {
-        log('下载 get-pip.py 引导 pip...');
-        if (downloadFileSync('https://bootstrap.pypa.io/get-pip.py', GET_PIP_PY)) {
+        log('嵌入式 Python 未内置 ensurepip（嵌入式发行版常见），改用 get-pip.py 引导');
+        if (ensureGetPip()) {
             run(`"${PYTHON_EXE}" "${GET_PIP_PY}" --no-warn-script-location --disable-pip-version-check`);
+        } else {
+            log('get-pip.py 获取失败（网络或镜像不可用）');
         }
     }
     if (!runOut(`"${PYTHON_EXE}" -m pip --version`)) {
@@ -109,6 +112,8 @@ function findEmbeddedPip() {
 
 // 同步下载小文件（用于 get-pip.py 引导）。Node 的 https 是异步的，
 // 这里将其写入临时脚本，由 execSync 阻塞等待完成。
+// 关键：必须校验 content-length，否则网络中断会留下"看起来存在、实际被截断"的
+// get-pip.py（Python 会报 unterminated triple-quoted string），后续每次引导都失败。
 function downloadFileSync(url, dest, redirectsLeft = 5) {
     const script = `
 const https = require('https');
@@ -119,28 +124,69 @@ function get(u, left) {
       res.resume();
       return get(new URL(res.headers.location, u).toString(), left - 1);
     }
-    if (res.statusCode === 200) {
-      res.pipe(fs.createWriteStream(${JSON.stringify(dest)}));
-    } else {
-      res.resume();
-    }
-    const t = setTimeout(() => process.exit(0), 2000);
-    res.on('end', () => { clearTimeout(t); process.exit(0); });
-  }).on('error', () => process.exit(1)).setTimeout(120000, function(){ this.destroy(); process.exit(1); });
+    if (res.statusCode !== 200) { res.resume(); console.error('HTTP ' + res.statusCode); process.exit(1); }
+    const expected = parseInt(res.headers['content-length'] || '0', 10);
+    const chunks = [];
+    res.on('data', (c) => chunks.push(c));
+    res.on('end', () => {
+      const buf = Buffer.concat(chunks);
+      if (expected && buf.length !== expected) {
+        console.error('incomplete ' + buf.length + '/' + expected);
+        process.exit(1);
+      }
+      try { fs.writeFileSync(${JSON.stringify(dest)}, buf); } catch (e) { console.error(e.message); process.exit(1); }
+      console.log('saved ' + buf.length + ' bytes');
+      process.exit(0);
+    });
+    res.on('error', (e) => { console.error(e.message); process.exit(1); });
+  }).on('error', (e) => { console.error(e.message); process.exit(1); })
+    .setTimeout(120000, function () { this.destroy(); console.error('timeout'); process.exit(1); });
 }
 get(${JSON.stringify(url)}, ${redirectsLeft});
 `;
     const tmp = path.join(PY_DIR, '_download_tmp.js');
     try {
         fs.mkdirSync(PY_DIR, { recursive: true });
+        try { fs.rmSync(dest, { force: true }); } catch (e) {}
         fs.writeFileSync(tmp, script);
-        execSync(`node "${tmp}"`, { stdio: 'ignore', timeout: 120000 });
+        execSync(`node "${tmp}"`, { stdio: ['ignore', 'pipe', 'pipe'], timeout: 150000 });
         return fs.existsSync(dest) && fs.statSync(dest).size > 0;
     } catch (e) {
+        try { fs.rmSync(dest, { force: true }); } catch (e2) {}
         return false;
     } finally {
         try { fs.rmSync(tmp, { force: true }); } catch (e) {}
     }
+}
+
+// get-pip.py 引导脚本的下载源（官方 + 国内镜像），逐个尝试
+const GET_PIP_URLS = [
+    'https://bootstrap.pypa.io/get-pip.py',
+    'https://mirrors.aliyun.com/pypi/get-pip.py'
+];
+
+// 校验 get-pip.py：大小合理且能被当前 Python 编译通过（能挡住被截断的坏文件）
+function isValidGetPip(file) {
+    try {
+        if (!fs.existsSync(file)) return false;
+        if (fs.statSync(file).size < 500 * 1024) return false; // 官方约 2MB
+        return runOut(`"${PYTHON_EXE}" -c "compile(open(r'${file}',encoding='utf-8').read(),'get-pip','exec')"`) !== null;
+    } catch (e) {
+        return false;
+    }
+}
+
+// 确保有可用的 get-pip.py（损坏则删除重下，逐镜像尝试）
+function ensureGetPip() {
+    if (isValidGetPip(GET_PIP_PY)) return true;
+    try { fs.rmSync(GET_PIP_PY, { force: true }); } catch (e) {}
+    log('下载 get-pip.py（用于引导嵌入式 Python 的 pip）...');
+    for (const url of GET_PIP_URLS) {
+        log(`  尝试：${url}`);
+        if (downloadFileSync(url, GET_PIP_PY) && isValidGetPip(GET_PIP_PY)) return true;
+        log('  该源不可用或文件损坏，尝试下一个源');
+    }
+    return false;
 }
 
 // 回退：系统 Python/pip（选择版本最高且可用的那个），配合 --target 安装

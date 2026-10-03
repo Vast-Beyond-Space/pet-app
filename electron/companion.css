@@ -1,4 +1,36 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+    /* ===== 设计令牌：主色（由主题系统程序化写入） ===== */
+    --brand: #4B3FE3;
+    --brand-hover: #3C2ECA;
+    --brand-active: #3327A8;
+    --brand-soft: #F2F7FF;
+    --brand-soft-strong: #E5EAFF;
+    --brand-text: #1A1759;
+    --brand-on: #FFFFFF;
+
+    /* ===== 语义色 ===== */
+    --danger: #E8463A;
+    --danger-hover: #D93B2F;
+    --text: #171717;
+    --text-muted: #6B6B70;
+
+    /* ===== 形状令牌（三档圆角） ===== */
+    --radius: 8px;
+    --radius-card: 12px;
+    --radius-full: 999px;
+
+    /* ===== 动效令牌 ===== */
+    --dur: 120ms;
+    /* ===== 表面 / 背景令牌（跟随主题切换） ===== */
+    --surface: #FFFFFF;
+    --surface-rgb: 255, 255, 255;
+    --surface-muted: #F4F5F7;
+    --surface-muted-rgb: 244, 245, 247;
+    --surface-app: #F5F6FA;
+    --surface-app-rgb: 245, 246, 250;
+}
 html, body {
     width: 100%; height: 100%;
     background: transparent;
@@ -122,4 +154,71 @@ html, body {
 @keyframes micStatusBlink {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
+}
+
+/* ============================================================
+   统一交互反馈（覆盖全站按钮）
+   四态：默认 / 悬停 / 按下 / 禁用；并补回键盘焦点环。
+   仅改变视觉反馈，不影响任何点击事件逻辑。
+   ============================================================ */
+button:not(:disabled) {
+    transition: transform var(--dur) ease, filter var(--dur) ease,
+                background var(--dur) ease, border-color var(--dur) ease,
+                color var(--dur) ease, opacity var(--dur) ease;
+}
+
+button:hover:not(:disabled) {
+    filter: brightness(0.95);
+}
+
+button:active:not(:disabled) {
+    transform: scale(0.96);
+    filter: brightness(0.9);
+}
+
+button:disabled {
+    cursor: not-allowed;
+    filter: grayscale(1);
+    opacity: 0.5;
+    transform: none;
+}
+
+button:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    button:not(:disabled) {
+        transition: none;
+    }
+}
+
+/* ============================================================
+   主题配色（程序化切换：JS 只需设置 <html data-accent="...">）
+   不设 data-theme 时使用 :root 中的默认紫。新增主题 = 复制一段。
+   ============================================================ */
+:root[data-accent="blue"] {
+    --brand: #2563EB; --brand-hover: #1D4ED8; --brand-active: #1B41B8;
+    --brand-soft: #EFF6FF; --brand-soft-strong: #DBEAFE; --brand-text: #1E3A8A;
+    --surface-app: #F2F6FE; --surface-app-rgb: 242, 246, 254;
+    --surface-muted: #EFF4FB; --surface-muted-rgb: 239, 244, 251;
+}
+:root[data-accent="teal"] {
+    --brand: #0D9488; --brand-hover: #0F766E; --brand-active: #0E655E;
+    --brand-soft: #ECFDF9; --brand-soft-strong: #CCFBF1; --brand-text: #134E4A;
+    --surface-app: #F0FAF8; --surface-app-rgb: 240, 250, 248;
+    --surface-muted: #ECF7F5; --surface-muted-rgb: 236, 247, 245;
+}
+:root[data-accent="green"] {
+    --brand: #16A34A; --brand-hover: #15803D; --brand-active: #136F35;
+    --brand-soft: #F0FDF4; --brand-soft-strong: #DCFCE7; --brand-text: #14532D;
+    --surface-app: #F2FBF4; --surface-app-rgb: 242, 251, 244;
+    --surface-muted: #EDF8F0; --surface-muted-rgb: 237, 248, 240;
+}
+:root[data-accent="pink"] {
+    --brand: #DB2777; --brand-hover: #BE185D; --brand-active: #A61553;
+    --brand-soft: #FDF2F8; --brand-soft-strong: #FCE7F3; --brand-text: #831843;
+    --surface-app: #FDF4F8; --surface-app-rgb: 253, 244, 248;
+    --surface-muted: #FBEEF3; --surface-muted-rgb: 251, 238, 243;
 }

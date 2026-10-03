@@ -22,7 +22,7 @@
 
 /* 2. 编辑器面板 */
 .grid-editor-panel {
-    background: white;
+    background: var(--surface);
     border-radius: 14px;
     width: 90vw;
     max-width: 900px;
@@ -36,7 +36,7 @@
 
 /* 3. 编辑器头部 */
 .grid-editor-header {
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    background: linear-gradient(135deg, var(--brand), var(--brand-hover));
     color: white;
     padding: 12px 16px;
     display: flex;
@@ -53,7 +53,7 @@
 /* 4. 编辑器工具栏 */
 .grid-editor-toolbar {
     padding: 8px 12px;
-    background: #f5f5f5;
+    background: var(--surface-muted);
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
@@ -66,7 +66,7 @@
     padding: 4px 10px;
     border: 2px solid #e0e0e0;
     border-radius: 8px;
-    background: white;
+    background: var(--surface);
     font-size: 20px;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -79,10 +79,10 @@
 }
 
 .tile-btn.active {
-    border-color: #667eea;
+    border-color: var(--brand);
     background: #e8eaf6;
     transform: scale(1.1);
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--brand) 40%, transparent);
 }
 
 .tile-btn .tile-label {
@@ -103,7 +103,7 @@
     padding: 6px 12px;
     border: 1px solid #ddd;
     border-radius: 6px;
-    background: white;
+    background: var(--surface);
     font-size: 12px;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -114,7 +114,7 @@
 }
 
 .tool-btn:hover {
-    background: #f0f0f0;
+    background: var(--surface-muted);
 }
 
 .tool-btn:active {
@@ -136,7 +136,7 @@
     flex: 1;
     overflow: auto;
     padding: 16px;
-    background: #e0e0e0;
+    background: var(--surface-muted);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -302,7 +302,7 @@
 }
 
 .grid-size-settings input:focus {
-    border-color: #667eea;
+    border-color: var(--brand);
 }
 
 /* 11. 透明度设置区域 */
@@ -328,7 +328,7 @@
     height: 5px;
     -webkit-appearance: none;
     appearance: none;
-    background: #e0e0e0;
+    background: var(--surface-muted);
     border-radius: 3px;
     outline: none;
 }
@@ -338,7 +338,7 @@
     appearance: none;
     width: 14px;
     height: 14px;
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    background: linear-gradient(135deg, var(--brand), var(--brand-hover));
     border-radius: 50%;
     cursor: pointer;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
@@ -347,7 +347,7 @@
 .transparency-settings .slider-row input[type="range"]::-moz-range-thumb {
     width: 14px;
     height: 14px;
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    background: linear-gradient(135deg, var(--brand), var(--brand-hover));
     border-radius: 50%;
     cursor: pointer;
     border: none;
@@ -356,7 +356,7 @@
 
 .transparency-settings .slider-row .slider-value {
     font-size: 11px;
-    color: #667eea;
+    color: var(--brand);
     font-weight: 600;
     min-width: 32px;
     text-align: right;

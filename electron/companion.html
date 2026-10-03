@@ -13,6 +13,8 @@
         
         <!-- 顶部按钮（悬浮） -->
         <div class="companion-controls">
+            <button class="ctrl-btn" id="backToPetBtn" title="回到桌宠模式">🐾</button>
+            <button class="ctrl-btn" id="testThinkBtn" title="立即想一下（测试思考）">💭</button>
             <button class="ctrl-btn" id="micBtn" title="持续录音">🎤</button>
             <button class="ctrl-btn" id="backToMainBtn" title="返回主窗口">🏠</button>
             <button class="ctrl-btn" id="switchToChatBtn" title="切换到浮窗聊天">💬</button>
@@ -31,6 +33,7 @@
         return 'img/' + (window._stickerPack || '默认') + '/' + filename;
     };
 </script>
+    <script src="ai-fallback.js"></script>
     <script src="companion.js"></script>
 </body>
 </html>

@@ -10,6 +10,36 @@
     --wall-opacity: 1;
     --floor-opacity: 1;
     --window-opacity: 1;
+
+    /* ===== 设计令牌：主色（由主题系统程序化写入） ===== */
+    --brand: #4B3FE3;
+    --brand-hover: #3C2ECA;
+    --brand-active: #3327A8;
+    --brand-soft: #F2F7FF;
+    --brand-soft-strong: #E5EAFF;
+    --brand-text: #1A1759;
+    --brand-on: #FFFFFF;
+
+    /* ===== 语义色 ===== */
+    --danger: #E8463A;
+    --danger-hover: #D93B2F;
+    --text: #171717;
+    --text-muted: #6B6B70;
+
+    /* ===== 形状令牌（三档圆角） ===== */
+    --radius: 8px;
+    --radius-card: 12px;
+    --radius-full: 999px;
+
+    /* ===== 动效令牌 ===== */
+    --dur: 120ms;
+    /* ===== 表面 / 背景令牌（跟随主题切换） ===== */
+    --surface: #FFFFFF;
+    --surface-rgb: 255, 255, 255;
+    --surface-muted: #F4F5F7;
+    --surface-muted-rgb: 244, 245, 247;
+    --surface-app: #F5F6FA;
+    --surface-app-rgb: 245, 246, 250;
 }
 
 .custom-titlebar {
@@ -18,7 +48,7 @@
     left: 0;
     right: 0;
     height: 32px;
-    background: rgba(245, 245, 245, calc(0.95 * var(--window-opacity)));
+    background: rgba(var(--surface-app-rgb), calc(0.95 * var(--window-opacity)));
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -66,7 +96,7 @@ body {
     height: 100vh;
     overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: rgba(245, 245, 245, var(--window-opacity));
+    background: rgba(var(--surface-app-rgb), var(--window-opacity));
     user-select: none;
     -webkit-user-select: none;
     padding-top: 32px;
@@ -87,7 +117,7 @@ body {
     width: 100%;
     height: 100%;
     overflow: hidden;
-    background: rgba(240, 240, 240, var(--window-opacity));
+    background: rgba(var(--surface-muted-rgb), var(--window-opacity));
 }
 
 .room {
@@ -235,7 +265,7 @@ body {
     top: -50px;
     left: 50%;
     transform: translateX(-50%);
-    background: white;
+    background: var(--surface);
     padding: 5px 10px;
     border-radius: 12px;
     font-size: 11px;
@@ -396,7 +426,7 @@ body {
 .affection-bar {
     flex: 1;
     height: 6px;
-    background: #fff;
+    background: var(--surface);
     border-radius: 3px;
     overflow: hidden;
 }
@@ -420,7 +450,7 @@ body {
     flex: 1;
     width: 35px;
     height: 3px;
-    background: #eee;
+    background: var(--surface-muted);
     border-radius: 2px;
     overflow: hidden;
 }
@@ -468,7 +498,7 @@ body {
 .activity-text {
     font-size: 10px;
     font-weight: 600;
-    color: #667eea;
+    color: var(--brand);
     text-align: center;
     padding-top: 4px;
     border-top: 1px solid #eee;
@@ -491,7 +521,7 @@ body {
 .action-btn {
     width: 36px;
     height: 36px;
-    background: #f5f5f5;
+    background: var(--surface-muted);
     border: none;
     border-radius: 50%;
     font-size: 18px;
@@ -504,11 +534,11 @@ body {
 
 .action-btn:active {
     transform: scale(0.9);
-    background: #e0e0e0;
+    background: var(--surface-muted);
 }
 
 .action-btn.chat {
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    background: linear-gradient(135deg, var(--brand), var(--brand-hover));
 }
 
 .chat-panel {
@@ -521,7 +551,7 @@ body {
     min-width: 300px;
     height: 65vh;
     max-height: 520px;
-    background: white;
+    background: var(--surface);
     border-radius: 14px;
     box-shadow: 0 8px 25px rgba(0,0,0,0.2);
     z-index: 201;
@@ -644,7 +674,7 @@ body {
     justify-content: space-between;
     align-items: center;
     padding: 12px 16px;
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    background: linear-gradient(135deg, var(--brand), var(--brand-hover));
     color: white;
     font-size: 14px;
     font-weight: 600;
@@ -669,7 +699,7 @@ body {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    background: #f5f5f5;
+    background: var(--surface-muted);
     box-sizing: border-box;
 }
 
@@ -700,7 +730,7 @@ body {
 
 .chat-message.from-pet {
     align-self: flex-start;
-    background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+    background: linear-gradient(135deg, var(--brand-soft), var(--brand-soft-strong));
     color: #1f1f1f;
     border-bottom-left-radius: 4px;
 }
@@ -724,7 +754,7 @@ body {
     gap: 8px;
     padding: 10px 12px;
     border-top: 1px solid #eee;
-    background: white;
+    background: var(--surface);
     flex-shrink: 0;
 }
 
@@ -757,7 +787,7 @@ body {
 
 .save-chat-btn {
     padding: 8px 12px;
-    background: #f0f0f0;
+    background: var(--surface-muted);
     border: none;
     border-radius: 18px;
     font-size: 13px;
@@ -767,7 +797,7 @@ body {
     flex-shrink: 0;
 }
 .save-chat-btn:hover {
-    background: #e0e0e0;
+    background: var(--surface-muted);
 }
 .save-chat-btn:active {
     transform: scale(0.95);
@@ -807,7 +837,7 @@ body {
 }
 
 .setting-item input[type="text"]:focus {
-    border-color: #667eea;
+    border-color: var(--brand);
 }
 
 .setting-item input[type="range"] {
@@ -815,7 +845,7 @@ body {
     height: 5px;
     -webkit-appearance: none;
     appearance: none;
-    background: #e0e0e0;
+    background: var(--surface-muted);
     border-radius: 3px;
     outline: none;
 }
@@ -825,7 +855,7 @@ body {
     appearance: none;
     width: 18px;
     height: 18px;
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    background: linear-gradient(135deg, var(--brand), var(--brand-hover));
     border-radius: 50%;
     cursor: pointer;
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
@@ -834,7 +864,7 @@ body {
 .setting-item input[type="range"]::-moz-range-thumb {
     width: 18px;
     height: 18px;
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    background: linear-gradient(135deg, var(--brand), var(--brand-hover));
     border-radius: 50%;
     cursor: pointer;
     border: none;
@@ -881,13 +911,13 @@ body {
     width: 16px;
     left: 3px;
     bottom: 3px;
-    background-color: white;
+    background-color: var(--surface);
     transition: .3s;
     border-radius: 50%;
 }
 
 .switch input:checked + .slider {
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    background: linear-gradient(135deg, var(--brand), var(--brand-hover));
 }
 
 .switch input:checked + .slider:before {
@@ -897,7 +927,7 @@ body {
 .save-btn {
     width: 100%;
     padding: 10px;
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    background: linear-gradient(135deg, var(--brand), var(--brand-hover));
     color: white;
     border: none;
     border-radius: 8px;
@@ -1001,7 +1031,7 @@ body {
     padding: 3px 8px;
     border: 1px solid #e0e0e0;
     border-radius: 12px;
-    background: #f5f5f5;
+    background: var(--surface-muted);
     font-size: 11px;
     color: #666;
     cursor: pointer;
@@ -1009,13 +1039,13 @@ body {
 }
 
 .tag-btn:hover {
-    background: #e8e8e8;
+    background: var(--surface-muted);
 }
 
 .tag-btn.active {
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    background: linear-gradient(135deg, var(--brand), var(--brand-hover));
     color: white;
-    border-color: #667eea;
+    border-color: var(--brand);
 }
 
 .dev-hint {
@@ -1053,7 +1083,7 @@ body {
 .dev-section-title {
     font-size: 12px;
     font-weight: 700;
-    color: #667eea;
+    color: var(--brand);
     margin-bottom: 10px;
     padding-left: 4px;
 }
@@ -1070,7 +1100,7 @@ body {
 }
 
 .setting-item textarea:focus {
-    border-color: #667eea;
+    border-color: var(--brand);
 }
 
 .memory-list {
@@ -1158,7 +1188,7 @@ body {
 .add-memory-btn {
     width: 100%;
     padding: 6px;
-    background: #f0f0f0;
+    background: var(--surface-muted);
     border: 1px dashed #ccc;
     border-radius: 6px;
     font-size: 11px;
@@ -1167,14 +1197,14 @@ body {
 }
 
 .add-memory-btn:active {
-    background: #e0e0e0;
+    background: var(--surface-muted);
 }
 
 .save-load-btn {
     flex: 1;
     padding: 6px 8px;
     margin: 3px;
-    background: #667eea;
+    background: var(--brand);
     border: none;
     border-radius: 6px;
     font-size: 11px;
@@ -1184,7 +1214,7 @@ body {
 }
 
 .save-load-btn:active {
-    background: #5a6fd6;
+    background: var(--brand-active);
     transform: scale(0.97);
 }
 
@@ -1209,7 +1239,7 @@ body {
 }
 
 .memory-modal-content {
-    background: white;
+    background: var(--surface);
     border-radius: 12px;
     padding: 16px;
     width: 80%;
@@ -1236,7 +1266,7 @@ body {
 }
 
 .memory-modal-input:focus {
-    border-color: #667eea;
+    border-color: var(--brand);
 }
 
 .memory-modal-buttons {
@@ -1256,12 +1286,12 @@ body {
 }
 
 .memory-modal-btn.cancel {
-    background: #f0f0f0;
+    background: var(--surface-muted);
     color: #666;
 }
 
 .memory-modal-btn.confirm {
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    background: linear-gradient(135deg, var(--brand), var(--brand-hover));
     color: white;
 }
 
@@ -1294,7 +1324,7 @@ body {
     height: 24px;
     border: none;
     border-radius: 6px;
-    background: #f0f0f0;
+    background: var(--surface-muted);
     color: #555;
     font-size: 14px;
     font-weight: 700;
@@ -1313,7 +1343,7 @@ body {
     height: 6px;
     -webkit-appearance: none;
     appearance: none;
-    background: #e0e0e0;
+    background: var(--surface-muted);
     border-radius: 3px;
     outline: none;
 }
@@ -1323,7 +1353,7 @@ body {
     appearance: none;
     width: 14px;
     height: 14px;
-    background: #667eea;
+    background: var(--brand);
     border-radius: 50%;
     cursor: pointer;
     box-shadow: 0 1px 3px rgba(0,0,0,0.2);
@@ -1332,7 +1362,7 @@ body {
 .stat-slider::-moz-range-thumb {
     width: 14px;
     height: 14px;
-    background: #667eea;
+    background: var(--brand);
     border-radius: 50%;
     cursor: pointer;
     border: none;
@@ -1343,7 +1373,7 @@ body {
     margin-top: 12px;
     width: 100%;
     padding: 8px;
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    background: linear-gradient(135deg, var(--brand), var(--brand-hover));
     color: white;
     border: none;
     border-radius: 6px;
@@ -1424,8 +1454,8 @@ body {
 
 .program-item-type {
     font-size: 10px;
-    color: #667eea;
-    background: #eef0ff;
+    color: var(--brand);
+    background: var(--brand-soft);
     padding: 1px 6px;
     border-radius: 8px;
 }
@@ -1446,7 +1476,7 @@ body {
 .program-item-tag {
     font-size: 9px;
     color: #888;
-    background: #e8e8e8;
+    background: var(--surface-muted);
     padding: 1px 5px;
     border-radius: 6px;
 }
@@ -1468,12 +1498,12 @@ body {
 }
 
 .program-item-btn.edit {
-    background: #667eea;
+    background: var(--brand);
     color: white;
 }
 
 .program-item-btn.edit:active {
-    background: #5a6fd6;
+    background: var(--brand-active);
 }
 
 .program-item-btn.delete {
@@ -1523,7 +1553,7 @@ body {
 .refresh-programs-btn {
     width: 100%;
     padding: 6px;
-    background: #f0f0f0;
+    background: var(--surface-muted);
     border: 1px dashed #ccc;
     border-radius: 6px;
     font-size: 11px;
@@ -1532,7 +1562,7 @@ body {
 }
 
 .refresh-programs-btn:active {
-    background: #e0e0e0;
+    background: var(--surface-muted);
 }
 
 .program-empty {
@@ -1556,7 +1586,7 @@ body {
 }
 
 .program-desc-edit-content {
-    background: white;
+    background: var(--surface);
     border-radius: 12px;
     padding: 16px;
     width: 80%;
@@ -1584,7 +1614,7 @@ body {
 }
 
 .program-desc-edit-input:focus {
-    border-color: #667eea;
+    border-color: var(--brand);
 }
 
 .program-desc-edit-buttons {
@@ -1603,12 +1633,12 @@ body {
 }
 
 .program-desc-edit-btn.cancel {
-    background: #f0f0f0;
+    background: var(--surface-muted);
     color: #666;
 }
 
 .program-desc-edit-btn.confirm {
-    background: #667eea;
+    background: var(--brand);
     color: white;
 }
 
@@ -1626,7 +1656,7 @@ body {
 }
 
 .program-delete-content {
-    background: white;
+    background: var(--surface);
     border-radius: 12px;
     padding: 16px;
     width: 80%;
@@ -1663,7 +1693,7 @@ body {
 }
 
 .program-delete-btn.cancel {
-    background: #f0f0f0;
+    background: var(--surface-muted);
     color: #666;
 }
 
@@ -1687,7 +1717,7 @@ body {
 }
 
 .program-add-content {
-    background: white;
+    background: var(--surface);
     border-radius: 12px;
     padding: 16px;
     width: 85%;
@@ -1730,7 +1760,7 @@ body {
 .program-add-field input:focus,
 .program-add-field select:focus,
 .program-add-field textarea:focus {
-    border-color: #667eea;
+    border-color: var(--brand);
 }
 
 .program-add-field textarea {
@@ -1763,7 +1793,7 @@ body {
 }
 
 .program-add-btn.cancel {
-    background: #f0f0f0;
+    background: var(--surface-muted);
     color: #666;
 }
 
@@ -1816,7 +1846,7 @@ body {
     padding: 6px 16px;
     border: none;
     border-radius: 6px;
-    background: #667eea;
+    background: var(--brand);
     color: white;
     cursor: pointer;
     font-size: 12px;
@@ -1825,7 +1855,7 @@ body {
 }
 
 .voice-preview-btn:hover {
-    background: #5a6fd6;
+    background: var(--brand-active);
 }
 
 .voice-preview-btn:active {
@@ -1834,7 +1864,7 @@ body {
 
 .voice-test-btn {
     padding: 8px 12px;
-    background: #f0f0f0;
+    background: var(--surface-muted);
     border: none;
     border-radius: 18px;
     font-size: 16px;
@@ -1845,7 +1875,7 @@ body {
 }
 
 .voice-test-btn:hover {
-    background: #e0e0e0;
+    background: var(--surface-muted);
     transform: scale(1.05);
 }
 
@@ -1869,7 +1899,7 @@ body {
     padding: 8px 16px;
     border: none;
     border-radius: 8px;
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    background: linear-gradient(135deg, var(--brand), var(--brand-hover));
     color: white;
     cursor: pointer;
     font-size: 14px;
@@ -1879,10 +1909,88 @@ body {
 
 .quick-chat-btn:hover {
     transform: scale(1.02);
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+    box-shadow: 0 2px 8px color-mix(in srgb, var(--brand) 40%, transparent);
 }
 
 .quick-chat-btn:active {
     transform: scale(0.98);
+}
+
+/* ============================================================
+   统一交互反馈（覆盖全站按钮）
+   四态：默认 / 悬停 / 按下 / 禁用；并补回键盘焦点环。
+   仅改变视觉反馈，不影响任何点击事件逻辑。
+   ============================================================ */
+button:not(:disabled) {
+    transition: transform var(--dur) ease, filter var(--dur) ease,
+                background var(--dur) ease, border-color var(--dur) ease,
+                color var(--dur) ease, opacity var(--dur) ease;
+}
+
+/* 悬停：轻微加深 */
+button:hover:not(:disabled) {
+    filter: brightness(0.95);
+}
+
+/* 按下：轻微收缩并加深（收敛各处不一致的 scale 值） */
+button:active:not(:disabled) {
+    transform: scale(0.96);
+    filter: brightness(0.9);
+}
+
+/* 禁用：灰化 + 明确不可点，与 JS 中已有的 btn.disabled 逻辑对接 */
+button:disabled {
+    cursor: not-allowed;
+    filter: grayscale(1);
+    opacity: 0.5;
+    transform: none;
+}
+
+/* 键盘可达性：聚焦时显示焦点环 */
+button:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    button:not(:disabled) {
+        transition: none;
+    }
+}
+
+/* ============================================================
+   主题配色（程序化切换：JS 只需设置 <html data-accent="...">）
+   不设 data-theme 时使用 :root 中的默认紫。新增主题 = 复制一段。
+   ============================================================ */
+:root[data-accent="blue"] {
+    --brand: #2563EB; --brand-hover: #1D4ED8; --brand-active: #1B41B8;
+    --brand-soft: #EFF6FF; --brand-soft-strong: #DBEAFE; --brand-text: #1E3A8A;
+    --surface-app: #F2F6FE; --surface-app-rgb: 242, 246, 254;
+    --surface-muted: #EFF4FB; --surface-muted-rgb: 239, 244, 251;
+}
+:root[data-accent="teal"] {
+    --brand: #0D9488; --brand-hover: #0F766E; --brand-active: #0E655E;
+    --brand-soft: #ECFDF9; --brand-soft-strong: #CCFBF1; --brand-text: #134E4A;
+    --surface-app: #F0FAF8; --surface-app-rgb: 240, 250, 248;
+    --surface-muted: #ECF7F5; --surface-muted-rgb: 236, 247, 245;
+}
+:root[data-accent="green"] {
+    --brand: #16A34A; --brand-hover: #15803D; --brand-active: #136F35;
+    --brand-soft: #F0FDF4; --brand-soft-strong: #DCFCE7; --brand-text: #14532D;
+    --surface-app: #F2FBF4; --surface-app-rgb: 242, 251, 244;
+    --surface-muted: #EDF8F0; --surface-muted-rgb: 237, 248, 240;
+}
+:root[data-accent="pink"] {
+    --brand: #DB2777; --brand-hover: #BE185D; --brand-active: #A61553;
+    --brand-soft: #FDF2F8; --brand-soft-strong: #FCE7F3; --brand-text: #831843;
+    --surface-app: #FDF4F8; --surface-app-rgb: 253, 244, 248;
+    --surface-muted: #FBEEF3; --surface-muted-rgb: 251, 238, 243;
 }
 

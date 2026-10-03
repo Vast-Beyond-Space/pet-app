@@ -177,23 +177,48 @@ ipcMain.handle('list-sticker-packs', () => {
 });
 
 // ===== AI 对话（智谱）=====
-ipcMain.handle('ai-chat', (e, { messages, maxTokens = 200, temperature = 0.8 }) => new Promise((resolve, reject) => {
-    if (!zhipuApiKey) return reject(new Error('请先在设置中填写智谱 API Key'));
-    const model = 'glm-4-flash';
-    const body = JSON.stringify({ model, messages, max_tokens: maxTokens, temperature });
-    const req = https.request({
-        hostname: 'open.bigmodel.cn', path: '/api/paas/v4/chat/completions', method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${zhipuApiKey}`, 'Content-Length': Buffer.byteLength(body) },
-        rejectUnauthorized: false, timeout: 30000
-    }, (res) => {
-        let data = '';
-        res.on('data', c => data += c);
-        res.on('end', () => { try { const j = JSON.parse(data); j.error ? reject(new Error(j.error.message)) : resolve(j); } catch (err) { reject(new Error('解析失败')); } });
+// GLM 候选模型：访问量大/限流时依次回退（均支持多模态+文本）
+const GLM_FALLBACK_MODELS = ['glm-4.6v-flash', 'glm-4v-flash', 'glm-4v-plus'];
+
+function zhipuRequestOnce(model, messages, maxTokens, temperature) {
+    return new Promise((resolve, reject) => {
+        const body = JSON.stringify({ model, messages, max_tokens: maxTokens, temperature });
+        const req = https.request({
+            hostname: 'open.bigmodel.cn', path: '/api/paas/v4/chat/completions', method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${zhipuApiKey}`, 'Content-Length': Buffer.byteLength(body) },
+            rejectUnauthorized: false, timeout: 30000
+        }, (res) => {
+            let data = '';
+            res.on('data', c => data += c);
+            res.on('end', () => { try { const j = JSON.parse(data); j.error ? reject(new Error(j.error.message)) : resolve(j); } catch (err) { reject(new Error('解析失败')); } });
+        });
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(); reject(new Error('请求超时')); });
+        req.write(body); req.end();
     });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('请求超时')); });
-    req.write(body); req.end();
-}));
+}
+
+async function zhipuChatWithFallback(messages, maxTokens = 200, temperature = 0.8, models = GLM_FALLBACK_MODELS) {
+    let lastErr = null;
+    for (const m of models) {
+        try {
+            const j = await zhipuRequestOnce(m, messages, maxTokens, temperature);
+            if (m !== models[0]) {
+                console.log(`[lite:ai-chat] 模型回退成功: ${m}`);
+            }
+            return j;
+        } catch (e) {
+            lastErr = e;
+            console.warn(`[lite:ai-chat] 模型 ${m} 调用失败: ${e.message}`);
+        }
+    }
+    throw lastErr || new Error('所有智谱模型均调用失败');
+}
+
+ipcMain.handle('ai-chat', (e, { messages, maxTokens = 200, temperature = 0.8 }) => {
+    if (!zhipuApiKey) return Promise.reject(new Error('请先在设置中填写智谱 API Key'));
+    return zhipuChatWithFallback(messages, maxTokens, temperature);
+});
 
 // ===== DeepSeek 对话（OpenAI 兼容接口）=====
 ipcMain.handle('deepseek-chat', (e, { messages, maxTokens = 300, temperature = 0.8 }) => new Promise((resolve, reject) => {
@@ -213,28 +238,31 @@ ipcMain.handle('deepseek-chat', (e, { messages, maxTokens = 300, temperature = 0
     req.write(body); req.end();
 }));
 
-// ===== 多模态：截屏并让 GLM-4V 总结 =====
+// ===== 多模态：截屏并让 GLM-4.6V-Flash 总结 =====
 ipcMain.handle('capture-screen', async (e, recentMessages) => {
     if (!zhipuApiKey) throw new Error('请先填写智谱 API Key');
     const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 800, height: 600 } });
     const source = sources[0];
     if (!source) throw new Error('未找到屏幕源');
     const base64 = source.thumbnail.toJPEG(70).toString('base64');
-    const res = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${zhipuApiKey}` },
-        body: JSON.stringify({
-            model: 'glm-4v-flash',
-            messages: [
+    const visionCandidates = ['glm-4.6v-flash', 'glm-4v-flash', 'glm-4v-plus'];
+    let lastErr = null;
+    for (const m of visionCandidates) {
+        try {
+            const j = await zhipuRequestOnce(m, [
                 { role: 'system', content: '你是屏幕分析助手，用一句话总结用户当前在做什么，以及与对话相关的环境线索。' },
                 { role: 'user', content: [{ type: 'text', text: `最近对话：${recentMessages || '无'}` }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }] }
-            ],
-            max_tokens: 100, temperature: 0.5
-        })
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error.message);
-    return (data.choices && data.choices[0]) ? data.choices[0].message.content.trim() : '';
+            ], 100, 0.5);
+            if (m !== visionCandidates[0]) {
+                console.log(`[lite:capture-screen] 视觉模型回退成功: ${m}`);
+            }
+            return (j.choices && j.choices[0]) ? j.choices[0].message.content.trim() : '';
+        } catch (e) {
+            lastErr = e;
+            console.warn(`[lite:capture-screen] 视觉模型 ${m} 失败:`, e.message);
+        }
+    }
+    throw lastErr || new Error('所有视觉模型均失败');
 });
 
 // ===== 饼干 =====

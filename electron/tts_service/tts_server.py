@@ -11,6 +11,15 @@ import re
 
 import edge_tts
 
+# Windows 上管道（stdin/stdout）默认使用系统代码页（如 cp936），解码 Node 传来的
+# UTF-8 字节时会产出非法代理字符（\udcXX），edge-tts 内部 text.encode("utf-8")
+# 随即抛 "surrogates not allowed"。这里强制把标准流切到 UTF-8，任何调用方都能安全传中文。
+for _stream in (sys.stdin, sys.stdout):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 # 仅记录 WARNING 及以上，避免每次合成都刷 INFO 日志（Step1/2/3、Synthesis successful 等）
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

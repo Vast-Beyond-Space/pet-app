@@ -111,6 +111,39 @@ let config = {
     multimodalEnabled: false,
     multimodalProvider: 'deepseek',
     zhipuApiUrl: '',
+    // ===== 本地 LLM（OpenAI 兼容：Ollama / LM Studio / vLLM 等）=====
+    localApiUrl: '',
+    localApiKey: '',
+    localModel: '',
+    localCompanionModel: '',
+    localMemoryModel: '',
+    localVisionModel: '',
+    // ===== 云端模型自主选择（设置面板「模型选择」；空 = 用提供商默认）=====
+    deepseekModel: '',
+    deepseekCompanionModel: '',
+    deepseekMemoryModel: '',
+    deepseekVisionModel: '',
+    zhipuModel: '',
+    zhipuCompanionModel: '',
+    zhipuMemoryModel: '',
+    zhipuVisionModel: '',
+    // ===== 自定义 / 中转站（OpenAI 兼容，地址与 Key 全部自填）=====
+    customName: '',
+    customApiUrl: '',
+    customApiKey: '',
+    customModel: '',
+    customCompanionModel: '',
+    customMemoryModel: '',
+    customVisionModel: '',
+    // ===== 回退与重试（主进程 ai-chat-request 内部执行；这里只保存配置）=====
+    aiMaxRetries: 2,
+    aiRetryDelayMs: 800,
+    aiRetryBackoff: true,
+    crossProviderFallback: true,
+    deepseekFallbackModels: [],
+    zhipuFallbackModels: ['glm-4v-flash', 'glm-4v-plus'],
+    localFallbackModels: [],
+    customFallbackModels: [],
     selectedVoice: 'default',
     voiceEnabled: true,
     voiceAutoSend: true,
@@ -119,7 +152,14 @@ let config = {
     companionHeight: 350,
     companionFontSize: 14,
     companionPetSize: 180,
-    stickerPack: '默认'
+    stickerPack: '默认',
+    // 外观主题（purple 为默认；其它值由 CSS 的 :root[data-accent=...] 提供配色）
+    theme: 'purple',
+    // 陪伴模式数值体系设置（与 companion.js 共用 petConfig）
+    companionThoughtFreq: 'low',
+    companionThoughtVisible: false,
+    companionTalkThreshold: 54,
+    companionScreenSensitivity: 'medium'
 };
 
 // ===== 贴图路径辅助函数 =====
@@ -383,7 +423,17 @@ function saveConfig() {
     }
 }
 
+// ===== 外观主题（程序化配色）=====
+// 仅切换 <html data-accent="...">，配色由 CSS 的 --brand 系列令牌驱动。
+const THEME_NAMES = ['purple', 'blue', 'teal', 'green', 'pink'];
+function applyTheme(name) {
+    const t = THEME_NAMES.indexOf(name) >= 0 ? name : 'purple';
+    document.documentElement.setAttribute('data-accent', t);
+}
+
 function applyConfig() {
+    // 外观主题
+    applyTheme(config.theme || 'purple');
     apiKeyInput.value = config.apiKey;
     apiUrlInput.value = config.apiUrl;
     aiDecideToggle.checked = config.aiDecide;
@@ -493,10 +543,20 @@ function applyConfig() {
     const multimodalProviderSelect = document.getElementById('multimodalProviderSelect');
     const zhipuApiKeyInput = document.getElementById('zhipuApiKeyInput');
     const zhipuApiUrlInput = document.getElementById('zhipuApiUrlInput');
+    const localApiUrlInput = document.getElementById('localApiUrlInput');
+    const localModelInput = document.getElementById('localModelInput');
+    const localCompanionModelInput = document.getElementById('localCompanionModelInput');
+    const localMemoryModelInput = document.getElementById('localMemoryModelInput');
+    const localVisionModelInput = document.getElementById('localVisionModelInput');
     if (multimodalToggle) multimodalToggle.checked = config.multimodalEnabled;
     if (multimodalProviderSelect) multimodalProviderSelect.value = config.multimodalProvider || 'deepseek';
     if (zhipuApiKeyInput) zhipuApiKeyInput.value = config.zhipuApiKey || '';
     if (zhipuApiUrlInput) zhipuApiUrlInput.value = config.zhipuApiUrl || '';
+    if (localApiUrlInput) localApiUrlInput.value = config.localApiUrl || '';
+    if (localModelInput) localModelInput.value = config.localModel || '';
+    if (localCompanionModelInput) localCompanionModelInput.value = config.localCompanionModel || '';
+    if (localMemoryModelInput) localMemoryModelInput.value = config.localMemoryModel || '';
+    if (localVisionModelInput) localVisionModelInput.value = config.localVisionModel || '';
 }
 
 // 应用大小设置：主窗口桌宠、家具 emoji 使用 CSS 变量；小窗口桌宠通过 IPC 通知浮窗
@@ -907,8 +967,14 @@ async function addMemoryItem(text) {
         // 去重检查：避免重复添加相同记忆
         const exists = memoryItems.some(m => m.text === trimmed);
         if (exists) return;
-        memoryItems.push({ text: trimmed });
-        await saveMemory();
+        // 用 append-only 写入：多窗口共用 petMemory.json，整份覆盖会把浮窗刚写入的记忆冲掉
+        if (window.electronAPI && window.electronAPI.memoryAppend) {
+            const res = await window.electronAPI.memoryAppend([{ text: trimmed }]);
+            if (res && Array.isArray(res.items)) memoryItems = res.items;
+        } else {
+            memoryItems.push({ text: trimmed });
+            await saveMemory();
+        }
         renderMemoryList();
     }
 }
@@ -1128,22 +1194,28 @@ function hideIllust() {
 // 当前选中的提供商（DeepSeek / 智谱）返回对应的请求地址、API Key 与模型名。
 function aiCredentials() {
     const provider = config.multimodalProvider || 'deepseek';
-    if (provider === 'zhipu') {
-        return {
-            apiUrl: config.zhipuApiUrl || 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
-            apiKey: config.zhipuApiKey || '',
-            model: 'glm-4-flash'
-        };
-    }
-    return {
-        apiUrl: config.apiUrl || 'https://api.deepseek.com/v1/chat/completions',
-        apiKey: config.apiKey || '',
-        model: 'deepseek-v4-flash'
-    };
+    const cred = window.AIFallback
+        ? window.AIFallback.credentials(config, provider)
+        : { apiUrl: config.apiUrl || 'https://api.deepseek.com/v1/chat/completions', apiKey: config.apiKey || '' };
+    return { apiUrl: cred.apiUrl, apiKey: cred.apiKey, model: modelFor('chat') };
 }
-// 当前选中的 AI 提供商是否已配置可用 Key
+// 按模式返回当前提供商的模型名（chat / memory / vision / companion）
+// 模型名由设置面板「模型选择」自主配置，解析规则统一由 ai-fallback.js 提供：
+// 用途模型 → 聊天模型 → 提供商默认模型（deepseek / zhipu / custom / local 各自独立存储）。
+function modelFor(mode = 'chat') {
+    const p = config.multimodalProvider || 'deepseek';
+    if (window.AIFallback) return window.AIFallback.resolveModel(config, p, mode);
+    const fallback = p === 'zhipu' ? 'glm-4.6v-flash' : p === 'local' ? '' : 'deepseek-flash';
+    return fallback;
+}
+
+// 当前选中的 AI 提供商是否已配置可用凭据（本地 LLM 只需地址，云端需要 Key）
 function aiHasKey() {
-    return !!aiCredentials().apiKey;
+    const c = aiCredentials();
+    if ((config.multimodalProvider || 'deepseek') === 'local') {
+        return !!c.apiUrl;
+    }
+    return !!c.apiKey;
 }
 
 async function askAiToSummarize(text) {
@@ -1155,10 +1227,10 @@ async function askAiToSummarize(text) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${c.apiKey}`
+                ...(c.apiKey ? { 'Authorization': `Bearer ${c.apiKey}` } : {})
             },
             body: JSON.stringify({
-                model: c.model,
+                ...(modelFor('memory') ? { model: modelFor('memory') } : {}),
                 messages: [
                     {
                         role: 'system',
@@ -2168,10 +2240,10 @@ async function aiDecideDestination() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${c.apiKey}`
+                ...(c.apiKey ? { 'Authorization': `Bearer ${c.apiKey}` } : {})
             },
             body: JSON.stringify({
-                model: c.model,
+                ...(c.model ? { model: c.model } : {}),
                 messages: [
                     {
                         role: 'system',
@@ -2455,10 +2527,10 @@ async function decideMoodByState() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${c.apiKey}`
+                ...(c.apiKey ? { 'Authorization': `Bearer ${c.apiKey}` } : {})
             },
             body: JSON.stringify({
-                model: c.model,
+                ...(c.model ? { model: c.model } : {}),
                 messages: [
                     { role: 'system', content: '你是一个桌宠，根据自身状态选择心情。只返回心情名称。' },
                     { role: 'user', content: prompt }
@@ -2506,10 +2578,10 @@ async function petStartConversation() {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${c.apiKey}`
+                    ...(c.apiKey ? { 'Authorization': `Bearer ${c.apiKey}` } : {})
                 },
                 body: JSON.stringify({
-                    model: c.model,
+                    ...(c.model ? { model: c.model } : {}),
                     messages: [
                         { role: 'system', content: systemPrompt },
                         { role: 'user', content: '请主动开启话题和我聊天' }
@@ -2628,10 +2700,10 @@ async function sendChatMessage(text) {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`
+                    ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {})
                 },
                 body: JSON.stringify({
-                    model: model,
+                    ...(model ? { model: model } : {}),
                     messages: messages,
                     max_tokens: 120,
                     temperature: 0.8
@@ -2716,10 +2788,26 @@ async function summarizeMemoryOnChatClose() {
         const historySnapshot = chatHistory.slice();
         chatHistory = [];
 
-        // 2. 构建完整对话记录
-        const conversationText = historySnapshot
-            .map(msg => msg.role === 'user' ? `用户：${msg.content}` : `桌宠：${msg.content}`)
-            .join('\n');
+        // 2. 构建对话消息：按真实角色逐条发送（role=user / assistant）。
+        // 旧写法把 user 与 assistant 拼成一段纯文本、只用"用户：/桌宠："前缀区分，
+        // 模型很容易忽略前缀、把用户第一人称原话当成桌宠自己的话。
+        const conversationMessages = historySnapshot
+            .filter(m => m && (m.role === 'user' || m.role === 'assistant'))
+            .map(m => {
+                let content = m.content;
+                if (Array.isArray(content)) {
+                    // 不序列化图片块（会带出十几万字符的 data URL）
+                    content = content.map(b => {
+                        if (!b) return '';
+                        if (typeof b === 'string') return b;
+                        if (b.type === 'text') return b.text || '';
+                        if (b.type === 'file' || b.type === 'image_url' || b.image_url) return '[截图]';
+                        return typeof b.text === 'string' ? b.text : '';
+                    }).filter(Boolean).join('\n');
+                }
+                return { role: m.role, content: String(content == null ? '' : content) };
+            })
+            .filter(m => m.content.trim());
 
         // 3. 已保存的记忆（长期），提示AI不要重复
         const existingMemoriesText = memoryItems.length > 0
@@ -2730,31 +2818,35 @@ async function summarizeMemoryOnChatClose() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${c.apiKey}`
+                ...(c.apiKey ? { 'Authorization': `Bearer ${c.apiKey}` } : {})
             },
             body: JSON.stringify({
-                model: c.model,
+                ...(modelFor('memory') ? { model: modelFor('memory') } : {}),
                 messages: [
                     {
                         role: 'system',
-                        content: `你是一个记忆助手。请根据以下完整对话内容，提取真正值得长期记忆的信息。
+                        content: `你是记忆助手。你会收到一段真实的对话记录：role=user 是用户说的话，role=assistant 是桌宠说的话。
 
 重要规则：
+0. 用户明确要求记住的内容必须记录（"记住这个数字""帮我记一下""别忘了""我叫…"），一律不得判为"无"。
 1. 只记录用户的偏好、重要事实、约定、重大事件等真正有长期价值的信息。
 2. 不要总结"桌宠做了什么"、"今天聊了什么"等日常琐事，除非涉及非常重大的事件。
-3. 如果没有值得长期记忆的信息，直接返回"无"。
-4. 每个记忆要点不超过20字，每行一个。
-5. 严格检查已保存的记忆，不要重复保存相同或高度相似的内容。
+3. 没有值得长期记忆的内容就输出"无"。
+4. 每条不超过20字，每行一条。
+5. **分清楚人称**：user 说的话才是"用户"的事实，assistant 说的话是桌宠自己的话，不要把桌宠说的话记成用户的事。记忆主语一律写「用户」（第三人称），涉及桌宠自身写「桌宠」，不要用「我」「我的」「你」「我们」。例如 user 说"我喜欢群青色"，要记成"用户喜欢群青色"。
+6. 严格检查已保存的记忆，不要重复保存相同或高度相似的内容。
+7. 直接输出条目本身，每行一条，不要输出任何标题或标签（例如不要写"文本记忆："）。
 
 ${existingMemoriesText}`
                     },
+                    ...conversationMessages,
                     {
                         role: 'user',
-                        content: `以下是完整对话记录：\n${conversationText}`
+                        content: '请从上面的对话中提取值得长期记忆的信息，每行一条，不超过20字；没有可记忆内容时只输出"无"。直接输出条目本身，不要任何标题或标签。'
                     }
                 ],
-                max_tokens: 100,
-                temperature: 0.5
+                max_tokens: 300,
+                temperature: 0.4
             })
         });
 
@@ -3359,6 +3451,11 @@ if (floorOpacitySlider) {
     const multimodalToggle = document.getElementById('multimodalToggle');
     const multimodalProviderSelect = document.getElementById('multimodalProviderSelect');
     const zhipuApiUrlInput = document.getElementById('zhipuApiUrlInput');
+    const localApiUrlInput = document.getElementById('localApiUrlInput');
+    const localModelInput = document.getElementById('localModelInput');
+    const localCompanionModelInput = document.getElementById('localCompanionModelInput');
+    const localMemoryModelInput = document.getElementById('localMemoryModelInput');
+    const localVisionModelInput = document.getElementById('localVisionModelInput');
 
     if (multimodalProviderSelect) {
         multimodalProviderSelect.addEventListener('change', () => {
@@ -3367,6 +3464,8 @@ if (floorOpacitySlider) {
                 config.zhipuApiUrl = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
             } else if (config.multimodalProvider === 'deepseek' && !config.apiUrl) {
                 config.apiUrl = 'https://api.deepseek.com/v1/chat/completions';
+            } else if (config.multimodalProvider === 'local' && !config.localApiUrl) {
+                config.localApiUrl = 'http://localhost:11434/v1/chat/completions';
             }
             saveConfig();
         });
@@ -3374,6 +3473,36 @@ if (floorOpacitySlider) {
     if (zhipuApiUrlInput) {
         zhipuApiUrlInput.addEventListener('change', () => {
             config.zhipuApiUrl = zhipuApiUrlInput.value.trim() || 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+            saveConfig();
+        });
+    }
+    if (localApiUrlInput) {
+        localApiUrlInput.addEventListener('change', () => {
+            config.localApiUrl = localApiUrlInput.value.trim() || 'http://localhost:11434/v1/chat/completions';
+            saveConfig();
+        });
+    }
+    if (localModelInput) {
+        localModelInput.addEventListener('change', () => {
+            config.localModel = localModelInput.value.trim();
+            saveConfig();
+        });
+    }
+    if (localCompanionModelInput) {
+        localCompanionModelInput.addEventListener('change', () => {
+            config.localCompanionModel = localCompanionModelInput.value.trim();
+            saveConfig();
+        });
+    }
+    if (localMemoryModelInput) {
+        localMemoryModelInput.addEventListener('change', () => {
+            config.localMemoryModel = localMemoryModelInput.value.trim();
+            saveConfig();
+        });
+    }
+    if (localVisionModelInput) {
+        localVisionModelInput.addEventListener('change', () => {
+            config.localVisionModel = localVisionModelInput.value.trim();
             saveConfig();
         });
     }
@@ -3408,10 +3537,20 @@ applyStatsBtn.addEventListener('click', () => {
     const multimodalProviderSelect = document.getElementById('multimodalProviderSelect');
     const zhipuApiKeyInput = document.getElementById('zhipuApiKeyInput');
     const zhipuApiUrlInput = document.getElementById('zhipuApiUrlInput');
+    const localApiUrlInput = document.getElementById('localApiUrlInput');
+    const localModelInput = document.getElementById('localModelInput');
+    const localCompanionModelInput = document.getElementById('localCompanionModelInput');
+    const localMemoryModelInput = document.getElementById('localMemoryModelInput');
+    const localVisionModelInput = document.getElementById('localVisionModelInput');
     config.multimodalEnabled = multimodalToggle ? multimodalToggle.checked : false;
     config.multimodalProvider = multimodalProviderSelect ? multimodalProviderSelect.value : 'deepseek';
     config.zhipuApiKey = zhipuApiKeyInput ? zhipuApiKeyInput.value.trim() : '';
     config.zhipuApiUrl = zhipuApiUrlInput ? zhipuApiUrlInput.value.trim() : '';
+    config.localApiUrl = localApiUrlInput ? localApiUrlInput.value.trim() : '';
+    config.localModel = localModelInput ? localModelInput.value.trim() : '';
+    config.localCompanionModel = localCompanionModelInput ? localCompanionModelInput.value.trim() : '';
+    config.localMemoryModel = localMemoryModelInput ? localMemoryModelInput.value.trim() : '';
+    config.localVisionModel = localVisionModelInput ? localVisionModelInput.value.trim() : '';
     // 陪伴模式设置
     const companionWidthSlider = document.getElementById('companionWidthSlider');
     const companionHeightSlider = document.getElementById('companionHeightSlider');
