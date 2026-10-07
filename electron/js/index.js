@@ -158,6 +158,8 @@ let config = {
     // 陪伴模式数值体系设置（与 companion.js 共用 petConfig）
     companionThoughtFreq: 'low',
     companionThoughtVisible: false,
+    companionUsePetSprite: false,
+    companionFreeMove: false,
     companionTalkThreshold: 54,
     companionScreenSensitivity: 'medium'
 };

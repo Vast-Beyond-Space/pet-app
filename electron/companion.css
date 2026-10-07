@@ -54,6 +54,32 @@ html, body {
     pointer-events: none;
 }
 .companion-pet:hover { transform: scale(1.05); }
+/* 自由移动行走朝向（与 float.js 的 .flip 一致：向右走时翻转） */
+.companion-pet.flip { transform: scaleX(-1); }
+.companion-pet.flip:hover { transform: scaleX(-1) scale(1.05); }
+
+/* ===== 行走动画（复刻 float.css：一跳一跳） ===== */
+.companion-pet {
+    --hop-height: -6px;
+    position: relative;
+    transform-origin: 50% 100%;
+}
+.companion-pet.walking {
+    animation: pet-hop 0.4s ease-in-out infinite;
+}
+.companion-pet.flip.walking {
+    animation: pet-hop-flip 0.4s ease-in-out infinite;
+}
+@keyframes pet-hop {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(var(--hop-height, -6px)); }
+}
+@keyframes pet-hop-flip {
+    0%, 100% { transform: scaleX(-1) translateY(0); }
+    50% { transform: scaleX(-1) translateY(var(--hop-height, -6px)); }
+}
+/* 桌宠贴图模式下贴图切换由 AI 的 <STATE> 指令驱动；
+   <MOVE> 驱动的是整个窗口的移动（复用桌宠浮窗的重力/游荡机制），窗口内容保持居中。 */
 
 /* 控制按钮 - 悬浮在右上角 */
 .companion-controls {

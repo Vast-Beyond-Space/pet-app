@@ -591,9 +591,37 @@ npm run build   # 生成 dist/ 目录下的 NSIS 安装包
 
 - 应用 ID：`com.example.petapp`
 - 安装包名：`pet-app-{version}-setup.exe`
-- 包含文件：`main.js`、`index.html`、`float.html`、`preload.js`、`css/`、`js/`、`img/`、`package.json`
-- 额外资源：`python/` 目录（嵌入式 Python 运行时）
+- 包含文件：`main.js`、`preload.js`、`voice.js`、`ai-fallback.js`、`index.html`、`float.html`、`float.css`、`float.js`、`companion.html`、`companion.css`、`companion.js`、`cookie.html`、`cookie.css`、`cookie.js`、`css/`、`js/`、`img/`、`package.json`
+- 额外资源：`python/`（嵌入式 Python 运行时）、`tts_service/`（Edge TTS 服务）、`stt_service/`（Vosk STT 服务，含模型）
 - NSIS 安装选项：可选择安装路径、创建桌面快捷方式、开始菜单快捷方式
+
+### 打包卡在「安装 Python 依赖」？
+
+`npm run build` 的第 2 步（安装 TTS/STT 依赖）会在**个别 Windows 环境**下卡死：终端停在 `pip install --upgrade pip` 或依赖解析处，长时间无任何输出。根因是 pip 写 HTTP 缓存的临时文件时挂起（Python 调用栈停在 `pip/_internal/network/cache.py` 的 `tempfile` 创建）。
+
+构建脚本已内置以下防护，正常情况下**无需手动处理**：
+
+- 所有 pip 命令强制 `--no-cache-dir`（关闭 HTTP 缓存，直接规避上述挂起）、`--disable-pip-version-check`、`--no-input`，并注入同名环境变量双保险；
+- 每条 pip 命令带超时（5 分钟），超时即判定失败并回退下一个镜像，**不会无限等待**；
+- pip 版本已足够新（≥ 22）时**跳过联网自升级**，减少不必要的网络交互。
+
+若仍异常，可单独运行 `npm run setup` 复现并查看具体报错；依赖缺失只会让 TTS/STT 功能降级，不影响应用本体运行，修复后重跑即可。
+
+### 打包报错「Error writing temporary file. Make sure your temp folder is valid」？
+
+打包最后一步（electron-builder 生成 NSIS 安装包）会先运行一个中间安装器以产出卸载器，此过程需要向**临时目录**写入插件临时文件。当系统临时目录不可写或所在系统盘空间不足时，就会报该错误并以退出码 2 失败。
+
+构建脚本已内置处理：`scripts/build.js` 会为整个构建过程把 `TEMP`/`TMP` 指向项目内的独立目录 `.build-tmp/`（已加入 `.gitignore`），无需手动干预。
+
+若你在其他环境自行调用 electron-builder 遇到相同报错，可手动指定一个可写、空间充足的临时目录，例如：
+
+```cmd
+set TEMP=D:\temp
+set TMP=D:\temp
+npx electron-builder --win --x64
+```
+
+> 说明：打包产生的**安装包本身**也已通过自定义 NSIS 脚本（`scripts/installer.nsh`）把 NSIS 的插件临时目录固定到 `%LOCALAPPDATA%\PetAppSetup-tmp`。因此即使目标机器的系统临时目录不可用（受限会话、环境变量无效、系统盘接近写满等），双击运行安装包时也不会再报「Error writing temporary file」。
 
 ## 开发说明
 

@@ -29,6 +29,26 @@ const GET_PIP_PY = path.join(PY_DIR, 'get-pip.py');
 // pip 安装镜像回退链：先走 pip 自身配置，再官方 PyPI，再到国内镜像，覆盖镜像缺失/网络差异
 const INDEXES = [null, 'https://pypi.org/simple', 'https://pypi.tuna.tsinghua.edu.cn/simple', 'https://mirrors.aliyun.com/pypi/simple'];
 
+// 所有 pip 命令统一附加的稳定参数：
+//   --no-cache-dir：关键！某些 Windows 环境下 pip 写 HTTP 缓存的临时文件会卡死
+//                   （stack 停在 pip/_internal/network/cache.py 的 tempfile 创建），
+//                   关闭缓存可彻底规避该挂起。
+//   --disable-pip-version-check：避免每次执行都联网做版本自检。
+//   --no-input：禁止任何交互式提示，防止无人值守的打包流程被卡住。
+const PIP_FLAGS = '--no-cache-dir --disable-pip-version-check --no-input';
+
+// 单条 pip 命令的最长等待时间（毫秒）；超时即视为失败并回退到下一个镜像，
+// 保证任何网络/文件系统异常都不会让 npm run build 无限期挂起。
+const PIP_TIMEOUT = 300000;
+
+// 统一注入给子进程的环境变量，双保险地关闭 pip 缓存与交互。
+const CHILD_ENV = {
+    ...process.env,
+    PIP_NO_CACHE_DIR: '1',
+    PIP_DISABLE_PIP_VERSION_CHECK: '1',
+    PIP_NO_INPUT: '1',
+};
+
 function log(msg) {
     console.log('[install-deps] ' + msg);
 }
@@ -36,7 +56,7 @@ function log(msg) {
 // 执行命令，失败返回 null（输出透传，方便看到 pip 日志）
 function run(cmd) {
     try {
-        execSync(cmd, { stdio: 'inherit' });
+        execSync(cmd, { stdio: 'inherit', env: CHILD_ENV, timeout: PIP_TIMEOUT });
         return true;
     } catch (e) {
         return false;
@@ -46,7 +66,7 @@ function run(cmd) {
 // 执行命令并捕获输出，失败返回 null
 function runOut(cmd) {
     try {
-        return execSync(cmd, { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).trim();
+        return execSync(cmd, { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8', env: CHILD_ENV, timeout: 120000 }).trim();
     } catch (e) {
         return null;
     }
@@ -224,12 +244,23 @@ function ensurePipVersion(pipCmd) {
             log('    请运行 `node scripts/bootstrap.js` 下载嵌入式 Python 3.11 到 electron/python/，或安装 Python 3.10+ 并勾选 "Add to PATH"。');
         }
     }
+    // 若当前 pip 版本已足够新（>=22.0），完全跳过联网升级：
+    // 既省时，也避免在不稳定的网络/文件系统环境下被自升级步骤卡住。
+    const pipVerOut = runOut(`${pipCmd} --version`);
+    const pm = pipVerOut && pipVerOut.match(/pip (\d+)\.(\d+)/);
+    if (pm) {
+        const pipVer = parseInt(pm[1], 10) * 100 + parseInt(pm[2], 10);
+        if (pipVer >= 2200) {
+            log(`pip 版本已足够新（${pm[1]}.${pm[2]}），跳过升级`);
+            return true;
+        }
+    }
     const idxs = [null, 'https://pypi.org/simple', 'https://pypi.tuna.tsinghua.edu.cn/simple', 'https://mirrors.aliyun.com/pypi/simple'];
     log('尝试将 pip 升级到最新版本（避免旧 pip 导致 "from versions: none"）...');
     for (const idx of idxs) {
         const idxArg = idx ? ` --index-url "${idx}"` : '';
         // 无 --target：直接升级当前 python 的 pip 本体
-        if (run(`${pipCmd} install --upgrade pip${idxArg} --disable-pip-version-check`)) {
+        if (run(`${pipCmd} install --upgrade pip${idxArg} ${PIP_FLAGS}`)) {
             log('pip 已升级 ✅');
             return true;
         }
@@ -241,7 +272,7 @@ function ensurePipVersion(pipCmd) {
 function runPip(pipCmd, spec, idx, useTarget) {
     const idxArg = idx ? ` --index-url "${idx}"` : '';
     const targetArg = useTarget ? ` --target "${SITE_PACKAGES}"` : '';
-    return run(`${pipCmd} install ${spec}${idxArg}${targetArg} --disable-pip-version-check`);
+    return run(`${pipCmd} install ${spec}${idxArg}${targetArg} ${PIP_FLAGS}`);
 }
 
 function ensurePackage(pipCmd, useTarget, pkgName, markerName, fallbackSpecs) {
@@ -296,7 +327,7 @@ function pythonCmdOf(pipCmd) {
 // 以退出码判断命令是否成功（不打印输出）
 function runOk(cmd) {
     try {
-        execSync(cmd, { stdio: 'ignore' });
+        execSync(cmd, { stdio: 'ignore', env: CHILD_ENV, timeout: PIP_TIMEOUT });
         return true;
     } catch (e) {
         return false;
@@ -323,7 +354,7 @@ function forceInstall(pipCmd, specs) {
             const idxArg = idx ? ` --index-url "${idx}"` : '';
             const targetArg = useTarget ? ` --target "${SITE_PACKAGES}"` : '';
             log(`强制重装 ${spec}` + (idx ? `（镜像：${idx}）` : '（pip 默认源）'));
-            if (runOk(`${pipCmd} install --force-reinstall ${spec}${idxArg}${targetArg} --disable-pip-version-check`)) {
+            if (runOk(`${pipCmd} install --force-reinstall ${spec}${idxArg}${targetArg} ${PIP_FLAGS}`)) {
                 return true;
             }
         }

@@ -48,7 +48,7 @@ const DIALOG_HARD_MAX = 30;      // 历史硬上限：懒压缩触发阈值（�
 const DIALOG_COMPRESS_RATIO = 0.25; // 新增对话占历史 25% 以上才触发 AI 总结（否则纯丢弃）
 const CAPTURE_INTERVAL = 10000;
 const TICK_INTERVAL = 10000;     // 数值 tick：10 秒
-const SPEAK_COOLDOWN = 90000;    // 说话冷却：90s（15min in ticks = 90 tick）
+const SPEAK_COOLDOWN = 90000;    // 说话冷却：90 秒
 
 // 四值初始（0-100）
 const INIT_STATS = { energy: 72, boredom: 35, affection: 25, novelty: 25 };
@@ -120,6 +120,11 @@ function loadConfig() {
                 companionThoughtEnabled: parsed.companionThoughtEnabled !== undefined ? parsed.companionThoughtEnabled : true,
                 companionThoughtFreq: parsed.companionThoughtFreq || 'low', // off|low|high
                 companionThoughtVisible: parsed.companionThoughtVisible !== undefined ? parsed.companionThoughtVisible : false,
+                // 桌宠贴图模式：用 浮窗_*.png 桌宠状态贴图代替 mood 立绘，贴图切换/移动由 AI 指令控制
+                companionUsePetSprite: parsed.companionUsePetSprite !== undefined ? !!parsed.companionUsePetSprite : false,
+                // 窗口自由移动：复用桌宠浮窗的 游荡/重力 机制（风格跟随 floatMoveMode）
+                companionFreeMove: parsed.companionFreeMove !== undefined ? !!parsed.companionFreeMove : false,
+                floatMoveMode: parsed.floatMoveMode || 'gravity',
                 companionTalkThreshold: parsed.companionTalkThreshold !== undefined ? parsed.companionTalkThreshold : TALK_THRESHOLD,
                 companionScreenSensitivity: parsed.companionScreenSensitivity || 'medium', // low|medium|high
                 // 外观主题（purple 为默认）
@@ -167,6 +172,9 @@ function loadConfig() {
         companionThoughtEnabled: true,
         companionThoughtFreq: 'low',
         companionThoughtVisible: false,
+        companionUsePetSprite: false,
+        companionFreeMove: false,
+        floatMoveMode: 'gravity',
         companionTalkThreshold: TALK_THRESHOLD,
         companionScreenSensitivity: 'medium',
         theme: 'purple'
@@ -215,6 +223,7 @@ function pullAuthoritativeConfig() {
         const keys = [
             'companionFontSize', 'companionPetSize',
             'companionThoughtFreq', 'companionThoughtVisible',
+            'companionUsePetSprite', 'companionFreeMove', 'floatMoveMode',
             'companionTalkThreshold', 'companionScreenSensitivity',
             'aiPrompt', 'zhipuApiKey', 'multimodalEnabled', 'multimodalProvider',
             'localApiUrl', 'localApiKey', 'localModel',
@@ -232,6 +241,12 @@ function pullAuthoritativeConfig() {
         speechEl.style.fontSize = config.companionFontSize + 'px';
         petImg.style.width = config.companionPetSize + 'px';
         petImg.style.height = config.companionPetSize + 'px';
+        // 应用贴图包与模式开关：进入陪伴模式前已开启的开关在这里生效
+        // （此前只赋值不应用，导致「桌宠贴图」不切换、「窗口自由移动」不下落）
+        window._stickerPack = config.stickerPack || '默认';
+        refreshMoodList();  // 资产列表按当前包刷新，完成后会再次应用 sprite 模式
+        applySpriteMode();
+        applyFreeMove();
         // [companion-debug] 打印从主进程拉到的陪伴字段
         console.log('[companion-debug][pullAuthoritativeConfig]', unified);
         console.log('[companion-debug][pullAuthoritativeConfig] thFreq=' + config.companionThoughtFreq +
@@ -243,6 +258,7 @@ function pullAuthoritativeConfig() {
 pullAuthoritativeConfig();
 
 // ===== 动态心情（依据当前贴图包 mood_*.png）：新增 mood_ 贴图会自动纳入立绘选择 =====
+// 同时收集 浮窗_*.png 桌宠状态贴图（桌宠贴图模式用），资产到位后应用一次模式开关。
 function refreshMoodList() {
     if (window.electronAPI && window.electronAPI.getPackAssets) {
         window.electronAPI.getPackAssets().then((a) => {
@@ -250,10 +266,398 @@ function refreshMoodList() {
                 MOOD_LIST.length = 0;
                 a.moods.forEach(m => { if (!MOOD_LIST.includes(m)) MOOD_LIST.push(m); });
             }
+            packStates = (a && Array.isArray(a.states)) ? a.states.slice() : [];
+            applySpriteMode();
         }).catch(() => {});
     }
 }
 refreshMoodList();
+
+// ===== 桌宠贴图模式（AI 控制贴图切换/移动，思考/说话系统不变）=====
+// 开启后用当前包的 浮窗_*.png 桌宠状态贴图代替 mood 立绘；
+// AI 在回复末尾附加 <STATE>状态名</STATE> 切换贴图、<MOVE>位置</MOVE> 移动（标记会被剥离，不朗读）。
+let spriteMode = false;          // 桌宠贴图模式是否生效（开关开 且 包内有浮窗_贴图）
+let packStates = [];             // 当前包可用的 浮窗_ 状态名列表
+let currentSpriteState = '';     // 当前显示的桌宠状态
+const SPRITE_DEFAULT_STATE = '发呆';
+
+// ===== 窗口自由移动（复刻桌宠浮窗 float.js 的移动机制）=====
+// 与浮窗同一套行为与物理常数：
+//   重力模式——开启/松手后窗口做抛物线下落弹跳（gravity=0.002，落地反弹 0.4），
+//             落地后停 2~6s → 沿地面走向 1/5 屏宽内的随机目标 → 循环；
+//   游荡模式——随机 2D 目标点（min(屏宽,屏高)/3 内），走到后再停 2~6s 选下一个；
+//             拖拽释放后停 3s 继续游荡（重力模式则按拖拽速度抛出）。
+//   MOVE_SPEED=1.2px/16ms、GRAVITY=0.002px/ms²、速度上限 ±2.0，全部与 float.js 相同。
+let freeMove = false;            // 是否启用（config.companionFreeMove）
+let moveMode = 'gravity';        // 移动风格（复用 config.floatMoveMode：gravity|wandering）
+let mvX = 0, mvY = 0;            // 引擎持有的窗口位置（左上角）
+let wanderTimer = null;          // 游荡调度定时器
+let stepping = false;            // 正在走向目标点
+let throwing = false;            // 抛物线进行中
+let workAreaCache = null;
+let lastWaRefresh = 0;
+const movePauseReason = { drag: false, recording: false };
+const MOVE_SPEED = 1.2;          // px/step，与 float.js 相同
+const MOVE_INTERVAL_MS = 16;     // 步进间隔，与 float.js 相同
+const GRAVITY = 0.002;           // px/ms²，与 float.js 抛物线相同
+const WA_MARGIN = 20;            // 工作区边距，与 float.js 相同
+// 拖拽速度采样（与 float.js 相同：mouseup 时按此速度抛出）
+let dragVelX = 0, dragVelY = 0, lastDragX = 0, lastDragY = 0, lastDragTime = 0;
+
+function currentMovePaused() { return movePauseReason.drag || movePauseReason.recording; }
+
+async function refreshWorkArea() {
+    try {
+        const wa = await window.electronAPI.getWorkAreaAtPoint(mvX + window.innerWidth / 2, mvY + window.innerHeight / 2);
+        if (wa && wa.width) workAreaCache = wa;
+    } catch (e) {}
+    if (!workAreaCache) {
+        const s = window.screen || {};
+        workAreaCache = { x: s.availLeft || 0, y: s.availTop || 0, width: s.availWidth || 1920, height: s.availHeight || 1040 };
+    }
+    lastWaRefresh = performance.now();
+}
+
+function moveWindowTo(x, y) {
+    if (window.electronAPI && window.electronAPI.moveCompanionWindow) {
+        window.electronAPI.moveCompanionWindow(Math.round(x), Math.round(y));
+    }
+}
+
+// 与 float.js 一致：向右走时翻转贴图（原始贴图朝左）
+function petFlip(stepX) {
+    if (stepX > 0) petImg.classList.add('flip');
+    else if (stepX < 0) petImg.classList.remove('flip');
+}
+
+function scheduleWander(delay) {
+    if (wanderTimer) { clearTimeout(wanderTimer); wanderTimer = null; }
+    if (!freeMove) return;
+    wanderTimer = setTimeout(() => { wanderTimer = null; wander(); },
+        delay == null ? (2000 + Math.random() * 4000) : delay);
+}
+
+// 走向目标点（wander 与 AI <MOVE> 指令共用）。gravity 模式 ty 传 null = 贴地面走。
+async function walkToTarget(targetX, targetY) {
+    if (!freeMove || stepping || throwing || currentMovePaused()) return;
+    if (!workAreaCache || performance.now() - lastWaRefresh > 2000) await refreshWorkArea();
+    const wa = workAreaCache;
+    if (!wa) return;
+    const winW = window.innerWidth || 400, winH = window.innerHeight || 350;
+    const groundY = wa.y + wa.height - winH;
+    if (moveMode === 'gravity') {
+        if (groundY - mvY > 4) { scheduleWander(1000); return; } // 还在空中：稍后重试，避免调度丢失
+        targetY = groundY;
+    }
+    targetX = Math.max(wa.x + WA_MARGIN, Math.min(wa.x + wa.width - winW - WA_MARGIN, targetX));
+    if (targetY != null) targetY = Math.max(wa.y, Math.min(groundY, targetY));
+
+    const dx = targetX - mvX, dy = (targetY == null ? 0 : targetY - mvY);
+    const dist = Math.hypot(dx, dy);
+    if (dist < 1) { scheduleWander(); return; }
+
+    let stepX = Math.max(-MOVE_SPEED * 2, Math.min(MOVE_SPEED * 2, (dx / dist) * MOVE_SPEED));
+    let stepY = Math.max(-MOVE_SPEED * 2, Math.min(MOVE_SPEED * 2, (dy / dist) * MOVE_SPEED));
+    if (moveMode === 'gravity') stepY = 0;  // Y 由物理系统管理（与 float.js 相同）
+    const totalSteps = Math.ceil((moveMode === 'gravity' ? Math.abs(dx) : dist) / MOVE_SPEED);
+    let currentStep = 0;
+    stepping = true;
+    petFlip(stepX);
+    petImg.classList.add('walking'); // 一跳一跳行走动画（复刻 float.js）
+
+    const step = () => {
+        if (!freeMove || currentMovePaused() || throwing) { // 抛物线优先，行走让位
+            petImg.classList.remove('walking');
+            stepping = false;
+            return;
+        }
+        currentStep++;
+        if (currentStep >= totalSteps) { mvX = targetX; if (targetY != null) mvY = targetY; }
+        else { mvX += stepX; mvY += stepY; }
+        if (moveMode === 'gravity') mvY = groundY;
+        // 边界：整窗始终在 workArea 内（与 float.js 相同，非重力模式反弹衰减 0.8）
+        if (mvX < wa.x) { mvX = wa.x; if (moveMode !== 'gravity') stepX = -Math.abs(stepX) * 0.8; }
+        else if (mvX + winW > wa.x + wa.width) { mvX = wa.x + wa.width - winW; if (moveMode !== 'gravity') stepX = Math.abs(stepX) * 0.8; }
+        if (moveMode !== 'gravity' && targetY != null) {
+            if (mvY < wa.y) { mvY = wa.y; stepY = Math.abs(stepY) * 0.8; }
+            else if (mvY > groundY) { mvY = groundY; stepY = -Math.abs(stepY) * 0.8; }
+        }
+        moveWindowTo(mvX, mvY);
+        if (currentStep < totalSteps) setTimeout(step, MOVE_INTERVAL_MS);
+        else {
+            petImg.classList.remove('walking');
+            stepping = false;
+            scheduleWander();
+        }
+    };
+    step();
+}
+
+// 游荡（与 float.js wander 同参数）：重力=地面 1/5 屏宽，游荡=2D 1/3 屏内
+async function wander() {
+    if (!freeMove || stepping || throwing || currentMovePaused()) return;
+    if (!workAreaCache || performance.now() - lastWaRefresh > 2000) await refreshWorkArea();
+    const wa = workAreaCache;
+    if (!wa) return;
+    const winW = window.innerWidth || 400, winH = window.innerHeight || 350;
+    let targetX, targetY;
+    if (moveMode === 'gravity') {
+        const maxMoveRange = wa.width / 5;
+        targetX = mvX + (Math.random() - 0.5) * 2 * maxMoveRange;
+        targetY = null; // 贴地面
+    } else {
+        const maxRange = Math.min(wa.width, wa.height) / 3;
+        const taskbarOffset = 48;
+        const minY = wa.y + WA_MARGIN, maxY = wa.y + wa.height - winH - WA_MARGIN - taskbarOffset;
+        targetX = mvX + (Math.random() - 0.5) * 2 * maxRange;
+        targetY = Math.max(minY, Math.min(maxY, mvY + (Math.random() - 0.5) * 2 * maxRange));
+    }
+    walkToTarget(targetX, targetY);
+}
+
+
+// 抛物线（复刻 float.js throwWithParabola）：拖拽释放/初始下落/跳跃共用
+// gravity=0.002、四边反弹 0.4、落地滑动 velX*=0.8 直到 <0.01 停止
+function throwWithParabola(vx, vy, randomIfZero) {
+    if (!freeMove || throwing || currentMovePaused()) return;
+    let velX = Math.max(-2.0, Math.min(2.0, Number(vx) || 0));
+    let velY = Math.max(-2.0, Math.min(2.0, Number(vy) || 0));
+    if (velX === 0 && velY === 0 && randomIfZero !== false) {
+        velX = (Math.random() < 0.5 ? -1 : 1) * 0.5; // 与 float.js 相同：纯下落带随机横速
+    }
+    throwing = true;
+    let lastTime = performance.now();
+
+    const step = () => {
+        if (!freeMove || currentMovePaused()) { throwing = false; return; }
+        const now = performance.now();
+        const dt = Math.min(60, now - lastTime);
+        lastTime = now;
+        const winW = window.innerWidth || 400, winH = window.innerHeight || 350;
+
+        velY += GRAVITY * dt;
+        mvX += velX * dt;
+        mvY += velY * dt;
+        if (now - lastWaRefresh > 300) refreshWorkArea();
+        const wa = workAreaCache || { x: 0, y: 0, width: 1920, height: 1040 };
+
+        if (mvX < wa.x) { mvX = wa.x; velX = Math.abs(velX) * 0.4; }
+        else if (mvX + winW > wa.x + wa.width) { mvX = wa.x + wa.width - winW; velX = -Math.abs(velX) * 0.4; }
+        const topBound = wa.y, bottomBound = wa.y + wa.height - winH;
+        if (mvY < topBound) { mvY = topBound; velY = Math.abs(velY) * 0.4; }
+        else if (mvY >= bottomBound) {
+            mvY = bottomBound;
+            if (Math.abs(velY) > 0.1) { velY = -velY * 0.4; velX *= 0.7; }
+            else {
+                velY = 0; velX *= 0.8;
+                moveWindowTo(mvX, mvY);
+                if (Math.abs(velX) < 0.01) {
+                    velX = 0;
+                    throwing = false;
+                    scheduleWander(2000); // 落定后与 float.js 同节奏进入游荡
+                    return;
+                }
+            }
+        }
+        moveWindowTo(mvX, mvY);
+        requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+}
+
+function startFreeMove() {
+    if (freeMove || !window.electronAPI || !window.electronAPI.moveCompanionWindow) return;
+    freeMove = true;
+    moveMode = (config.floatMoveMode === 'wandering') ? 'wandering' : 'gravity';
+    const pos = window.electronAPI.getWindowPos();
+    mvX = pos ? pos[0] : mvX; mvY = pos ? pos[1] : mvY;
+    workAreaCache = null; lastWaRefresh = 0;
+    refreshWorkArea();
+    if (moveMode === 'gravity') {
+        throwWithParabola(0, 0); // 从当前位置落到地面（下落可见，与拖拽释放同一套物理）
+    } else {
+        scheduleWander(2000);
+    }
+    console.log('[Companion] 自由移动开启（模式=' + moveMode + '）');
+}
+
+function stopFreeMove() {
+    freeMove = false;
+    if (wanderTimer) { clearTimeout(wanderTimer); wanderTimer = null; }
+    stepping = false;
+    throwing = false;
+    petImg.classList.remove('walking');
+}
+
+function applyFreeMove() {
+    if (config.companionFreeMove) startFreeMove();
+    else stopFreeMove();
+}
+
+function applySpriteMode() {
+    const want = !!config.companionUsePetSprite && packStates.length > 0;
+    if (want === spriteMode && !want) return;
+    spriteMode = want;
+    container.classList.toggle('sprite-mode', spriteMode);
+    if (spriteMode) {
+        const st = packStates.includes(SPRITE_DEFAULT_STATE) ? SPRITE_DEFAULT_STATE : packStates[0];
+        setPetSpriteState(st);
+        console.log('[Companion] 桌宠贴图模式开启，可用状态:', packStates.join('、'));
+    } else {
+        petImg.classList.remove('flip');
+        setMood(mood); // 关闭：恢复心情立绘
+    }
+}
+
+function setPetSpriteState(name) {
+    if (!packStates.length) return;
+    const st = packStates.includes(name) ? name
+        : (packStates.includes(SPRITE_DEFAULT_STATE) ? SPRITE_DEFAULT_STATE : packStates[0]);
+    currentSpriteState = st;
+    petImg.onerror = () => {
+        // 贴图缺失：先回退默认状态贴图；仍缺失则尝试「默认」包的同名贴图
+        if (st !== SPRITE_DEFAULT_STATE && packStates.includes(SPRITE_DEFAULT_STATE)) {
+            petImg.src = imgPath('浮窗_' + SPRITE_DEFAULT_STATE + '.png');
+        } else if (window._stickerPack && window._stickerPack !== '默认') {
+            petImg.onerror = null;
+            petImg.src = 'img/默认/浮窗_' + st + '.png';
+        }
+    };
+    petImg.src = imgPath('浮窗_' + st + '.png');
+    console.log('[Companion] 桌宠贴图切换(AI):', st);
+}
+
+function moveWindowCommand(posName) {
+    if (!freeMove || currentMovePaused()) return;
+    const name = String(posName || '').trim();
+    if (!name) return;
+    if (moveMode === 'gravity') {
+        // 重力模式（与浮窗行为一致）：上=抛物线跳跃，左/右=沿地面走向对应方向
+        if (name.indexOf('上') >= 0) {
+            stepping = false; // 停止行走循环，避免与抛物线同时写位置
+            throwWithParabola(0, -0.9, false); // 跳起后自然落地
+        } else if (name.indexOf('左') >= 0) {
+            walkToTarget(mvX - (workAreaCache ? workAreaCache.width : 1200) / 5, null);
+        } else if (name.indexOf('右') >= 0) {
+            walkToTarget(mvX + (workAreaCache ? workAreaCache.width : 1200) / 5, null);
+        } else if (/随机|随便|中心/.test(name)) {
+            scheduleWander(300);
+        }
+    } else {
+        // 游荡模式：按方位走向目标点
+        const dist = 260;
+        const dirs = { '左上': [-0.7, -0.7], '右上': [0.7, -0.7], '左下': [-0.7, 0.7], '右下': [0.7, 0.7], '左': [-1, 0], '右': [1, 0], '上': [0, -1], '下': [0, 1] };
+        let d = null;
+        for (const k of Object.keys(dirs)) { if (name.indexOf(k) >= 0) { d = dirs[k]; break; } }
+        if (!d && /中心/.test(name) && workAreaCache) {
+            d = [workAreaCache.x + workAreaCache.width / 2 - mvX, workAreaCache.y + workAreaCache.height / 2 - mvY];
+        }
+        if (!d || /随机|随便/.test(name)) { const a = Math.random() * Math.PI * 2; d = [Math.cos(a), Math.sin(a)]; }
+        const len = Math.hypot(d[0], d[1]) || 1;
+        walkToTarget(mvX + d[0] / len * dist, mvY + d[1] / len * dist);
+    }
+}
+
+// 从 AI 回复中剥离贴图/移动指令，返回干净文本 + 指令
+// 容错：智谱有几率漏写闭合标签（如 "<STATE>睡觉" 或与内容混在一行），
+// 此时取标签后第一行、截断到下一个 '<' 为止；完整闭合标签优先。
+function extractPetCommands(text) {
+    let clean = String(text == null ? '' : text);
+    let state = null, move = null;
+
+    const grab = (re, name) => {
+        let m = clean.match(re.full);
+        if (m) { clean = clean.replace(m[0], ''); }
+        else {
+            m = clean.match(re.open); // 无闭合：截到换行或下一个 '<'
+            if (m) clean = clean.replace(m[0], '');
+        }
+        if (m) {
+            const v = String(m[1] || '').trim().split('\n')[0].replace(/\s+/g, '');
+            re.out = v || null;
+        }
+    };
+    const stateRe = { full: /<STATE>\s*([^<]*?)\s*<\/STATE>/i, open: /<STATE>\s*([^\n<]*)/i, out: null };
+    const moveRe = { full: /<MOVE>\s*([^<]*?)\s*<\/MOVE>/i, open: /<MOVE>\s*([^\n<]*)/i, out: null };
+    grab(stateRe, 'state');
+    grab(moveRe, 'move');
+    // 兜底：清掉正文中残留的孤立/残缺标签片段，避免被朗读
+    clean = clean.replace(/<\/?(STATE|MOVE)>/gi, '');
+    return { clean: clean.trim(), state: stateRe.out, move: moveRe.out };
+}
+
+function applyPetCommands(cmds) {
+    if (!cmds) return;
+    if (cmds.state && spriteMode) setPetSpriteState(cmds.state);
+    if (cmds.move && freeMove) moveWindowCommand(cmds.move);
+}
+
+// 动作指令独立请求：每次说话后都会走一次（主回复带的标签优先，缺哪类补哪类）。
+// 不依赖主回复是否输出标签——智谱有几率漏标签，独立请求是贴图/移动的主路径而非兜底。
+// 走 mode=companion 候选链（空正文/繁忙自动切 glm-4-flash），不需要动作返回 null。
+// need: { state: bool, move: bool }——只请求缺失的类别，避免重复执行。
+async function requestPetCommandFallback(contextText, need) {
+    need = need || { state: spriteMode, move: freeMove };
+    if ((!spriteMode && !freeMove) || !isAiConfigured()) return null;
+    if (!window.electronAPI || !window.electronAPI.aiChatRequest) return null;
+    // 状态语义说明（按包内实际存在的状态动态生成）
+    const STATE_MEAN = { '游荡': '闲逛放松', '吃饭': '饿了/吃东西', '发呆': '无所事事/放空', '工作': '专注干活/加班', '生气': '被骂/不高兴', '睡觉': '困了/休息' };
+    const lines = [];
+    if (need.state && spriteMode) {
+        lines.push('第一行：<STATE>状态</STATE>，状态必须从下面选一个最匹配情境的（括号内是含义）：\n'
+            + packStates.map(s => s + '(' + (STATE_MEAN[s] || '状态') + ')').join('、'));
+    }
+    if (need.move && freeMove) {
+        lines.push('第二行：<MOVE>方向</MOVE>，方向可选：' + (moveMode === 'gravity'
+            ? '上(跳跃)/左/右/随机'
+            : '上/下/左/右/左上/右上/左下/右下/中心/随机') + '；不需要移动就输出 <MOVE>无</MOVE>');
+    }
+    // few-shot 示例：只用包内存在的状态，锚定小模型的语义映射
+    const ex = [];
+    if (need.state && spriteMode) {
+        const has = (s) => packStates.includes(s);
+        if (has('睡觉')) ex.push(['主人说“我困死了，要睡了”', '睡觉']);
+        if (has('吃饭')) ex.push(['主人说“好饿，点个外卖”', '吃饭']);
+        if (has('发呆')) ex.push(['主人夸你真可爱', '发呆']);
+        if (has('工作')) ex.push(['主人在赶工加班', '工作']);
+        if (has('生气')) ex.push(['主人说“别烦我”', '生气']);
+        if (ex.length) lines.push('示例（根据情境重新选择，不要沿用上一个状态）：\n' + ex.map(([c, s]) => '情境：' + c + ' → <STATE>' + s + '</STATE>' + (need.move ? '\n<MOVE>无</MOVE>' : '')).join('\n\n'));
+    }
+    const sys = '你是桌宠动作控制器。必须依次输出以下标签，除标签外不要输出任何其他文字：\n' + lines.join('\n');
+    const user = '情境：' + contextText + '\n当前时间：' + getTimePeriod();
+    try {
+        const r = await window.electronAPI.aiChatRequest({
+            messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
+            mode: 'companion',
+            model: companionModel(),
+            maxTokens: 60,
+            temperature: 0.5
+        });
+        const text = r && r.choices && r.choices[0] && r.choices[0].message
+            ? String(r.choices[0].message.content || '') : '';
+        if (!text) return null;
+        const cmds = extractPetCommands(text);
+        if (cmds.move && /^(无|不需要?|不移动)$/.test(cmds.move)) cmds.move = null; // <MOVE>无</MOVE> = 不移动
+        if (cmds.state && /^(无|不需要?|保持)$/.test(cmds.state)) cmds.state = null;
+        return (cmds.state || cmds.move) ? cmds : null;
+    } catch (e) {
+        console.warn('[Companion] 动作指令独立请求失败:', e.message);
+        return null;
+    }
+}
+
+// 统一入口：主回复带的标签优先，缺失的类别用独立请求补齐，返回合并后的指令。
+async function resolvePetCommands(petCmds, contextText) {
+    const needState = spriteMode && !petCmds.state;
+    const needMove = freeMove && !petCmds.move;
+    if (needState || needMove) {
+        const fb = await requestPetCommandFallback(contextText, { state: needState, move: needMove });
+        if (fb) {
+            return { state: petCmds.state || fb.state, move: petCmds.move || fb.move };
+        }
+    }
+    return petCmds;
+}
 
 // ===== 监听配置更新（与主窗口设置同步） =====
 if (window.electronAPI && window.electronAPI.onConfigUpdated) {
@@ -300,6 +704,15 @@ if (window.electronAPI && window.electronAPI.onConfigUpdated) {
             if (data.companionThoughtEnabled !== undefined) config.companionThoughtEnabled = !!data.companionThoughtEnabled;
             if (data.companionThoughtFreq !== undefined) config.companionThoughtFreq = data.companionThoughtFreq;
             if (data.companionThoughtVisible !== undefined) config.companionThoughtVisible = !!data.companionThoughtVisible;
+            if (data.companionUsePetSprite !== undefined) {
+                config.companionUsePetSprite = !!data.companionUsePetSprite;
+                applySpriteMode(); // 开关即时生效（切桌宠贴图 / 切回心情立绘）
+            }
+            if (data.floatMoveMode !== undefined) config.floatMoveMode = data.floatMoveMode;
+            if (data.companionFreeMove !== undefined) {
+                config.companionFreeMove = !!data.companionFreeMove;
+                applyFreeMove(); // 开关即时生效（开/关窗口自由移动）
+            }
             if (data.companionTalkThreshold !== undefined) config.companionTalkThreshold = Number(data.companionTalkThreshold) || TALK_THRESHOLD;
             if (data.companionScreenSensitivity !== undefined) config.companionScreenSensitivity = data.companionScreenSensitivity;
             if (data.theme !== undefined) applyTheme(data.theme);
@@ -388,8 +801,8 @@ async function updateStats() {
     if (stats.energy < 25) stats.energy += 0.35;
     stats.energy = Math.max(0, Math.min(80, stats.energy));
 
-    // 无聊：随时间积累（退潮：说话/互动释放）
-    stats.boredom += 0.10;
+    // 无聊：随时间积累（退潮：说话/互动释放）；封顶 100，防止长期运行后 talkDrive 恒过阈值
+    stats.boredom = Math.min(100, stats.boredom + 0.10);
 
     // 好感：常态微涨 + 互动额外加成（封顶 100）
     stats.affection += 0.002 + (hasActivity ? 0.02 : 0);
@@ -509,7 +922,7 @@ async function runOneThought() {
                 messages: [{ role: 'system', content: sys }, { role: 'user', content: userContent }],
                 mode: 'companion',
                 model: companionModel(), // 按当前提供商选模型（智谱 GLM / 本地 LLM / DeepSeek）
-                maxTokens: 120,
+                maxTokens: 512, // 视觉思考更长，预留思考开销防止 thinking 模型正文为空（实测 mt=300 仍可能被吃满）
                 temperature: 0.6
             });
             const msg = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message : null;
@@ -573,6 +986,11 @@ function scheduleTickCheck() { /* tick 由 startTicks 的 setInterval 驱动，�
 // ===== 切换心情（切换立绘） =====
 // 仅使用 mood_ 立绘贴图，如果加载失败则尝试其他心情
 function setMood(newMood) {
+    // 桌宠贴图模式：立绘切换只记录心情值，不改贴图（贴图由 AI 的 <STATE> 指令驱动）
+    if (spriteMode) {
+        if (newMood) mood = newMood;
+        return;
+    }
     if (!newMood || !MOOD_LIST.includes(newMood)) newMood = '鼓励';
     mood = newMood;
     petImg.src = imgPath('mood_' + newMood + '.png');
@@ -742,8 +1160,13 @@ async function speak() {
 
         console.log('[Companion] AI 主动说话回复:', reply);
 
+        // 剥离贴图/移动指令（<STATE>/<MOVE>，桌宠贴图模式下 AI 可附加），剩余部分进入说话解析
+        // 注意：clean 可能为空（AI 只回了指令）——此时三个分支都会自然跳过，仅执行指令
+        const petCmds = extractPetCommands(reply);
+        const replyBody = petCmds.clean;
+
         // 弱匹配解析 <SPEAK> 或 <SKIP>
-        const speakMatch = reply.match(/<SPEAK>(.+?)<\/SPEAK>/i);
+        const speakMatch = replyBody.match(/<SPEAK>(.+?)<\/SPEAK>/i);
         if (speakMatch) {
             const content = speakMatch[1].trim();
             if (content) {
@@ -761,16 +1184,18 @@ async function speak() {
                     recentSpeeches.push(content);
                     if (recentSpeeches.length > 10) recentSpeeches.shift();
                     await updateMoodFromResponse(content);
+                    // 桌宠贴图/自由移动：主回复带的标签优先，缺失的类别独立请求补齐
+                    applyPetCommands(await resolvePetCommands(petCmds, '你主动说了：' + content));
                     // 说话释放无聊（表达欲满足），冲动回落
                     stats.boredom = Math.max(0, stats.boredom - 26);
                     lastTalkTick = Date.now();
                 }
             }
-        } else if (/<SKIP>/i.test(reply)) {
+        } else if (/<SKIP>/i.test(replyBody)) {
             console.log('[Companion] 主动说话: AI 决定跳过');
         } else {
             // 弱匹配失败：如果回复看起来像一句话（短且不含标记），当作说话内容
-            const clean = reply.replace(/<[^>]+>/g, '').trim();
+            const clean = replyBody.replace(/<[^>]+>/g, '').trim();
             if (clean && clean.length <= 60 && clean.length >= 2) {
                 const isDuplicate = recentSpeeches.some(s => s === clean);
                 if (isDuplicate) {
@@ -782,6 +1207,11 @@ async function speak() {
                     recentSpeeches.push(clean);
                     if (recentSpeeches.length > 10) recentSpeeches.shift();
                     await updateMoodFromResponse(clean);
+                    // 桌宠贴图/自由移动：主回复带的标签优先，缺失的类别独立请求补齐
+                    applyPetCommands(await resolvePetCommands(petCmds, '你主动说了：' + clean));
+                    // 与 <SPEAK> 分支一致：说话释放无聊并重置冷却，防止 10s 后连说
+                    stats.boredom = Math.max(0, stats.boredom - 26);
+                    lastTalkTick = Date.now();
                 }
             } else {
                 console.log('[Companion] 主动说话: 弱匹配无效，跳过');
@@ -824,10 +1254,25 @@ async function callZhipu(prompt, retries = 2, imageBase64) {
 - 语气轻快口语化，常用"嘛""呀""啦""喔""诶"，但别每句都堆。
 - 颜文字要挑念出来不违和的，复杂的就别用了，用语气词代替。`;
 
+    // ===== 形象/动作控制：注入贴图与移动指令说明 =====
+    let rules = companionRules;
+    const cmdHints = [];
+    if (spriteMode && packStates.length) {
+        cmdHints.push('切换你的贴图：在回复末尾附加 <STATE>状态名</STATE>。可用状态：' + packStates.join('、'));
+    }
+    if (freeMove) {
+        cmdHints.push(moveMode === 'gravity'
+            ? '移动窗口：附加 <MOVE>方向</MOVE>（你在地面上：上=跳跃，左/右=朝该方向走，左上/右上=跳起并横移，随机=随便走走）'
+            : '移动窗口：附加 <MOVE>方向</MOVE>（可选：上/下/左/右/左上/右上/左下/右下/中心/随机）');
+    }
+    if (cmdHints.length) {
+        rules += '\n\n形象与动作控制（可选，按情境自然使用，不要每句都用）：\n- ' +
+            cmdHints.join('\n- ') + '\n- 标记都会被剥离，不会被朗读。';
+    }
     // ===== 缓存友好的系统提示 =====
     // system 完全静态（人设+规则，一字不动），保证智谱前缀缓存命中；
     // 所有动态信息（时间/屏幕/摘要/历史/思考）由调用方拼进 user prompt。
-    const systemPrompt = `${corePersona}\n\n${companionRules}`;
+    const systemPrompt = `${corePersona}\n\n${rules}`;
 
     console.log('[Companion] ===== callZhipu systemPrompt =====');
     console.log(systemPrompt);
@@ -854,7 +1299,9 @@ async function callZhipu(prompt, retries = 2, imageBase64) {
                 // 繁忙自动重试、失败自动回退（本函数外层的 retries 是最后一道保险）
                 mode: 'companion',
                 model: model,
-                maxTokens: 60,
+                // maxTokens 需容纳 thinking 模型的思考开销（视觉思考更长，实测可达 300+ token），
+                // 过小时思考占满预算导致正文为空（空正文已由主进程判定失败并自动换备选模型）
+                maxTokens: 512,
                 temperature: 0.8
             });
             if (result.choices && result.choices.length > 0) {
@@ -1177,6 +1624,7 @@ async function startContinuousRecording() {
 
     // Pause proactive speaking
     pauseSpeak();
+    movePauseReason.recording = true; // 录音期间暂停自由移动
 
     console.log('[Companion] Continuous recording started');
 }
@@ -1235,6 +1683,12 @@ function stopContinuousRecording() {
 
     // Resume proactive speaking
     resumeSpeak();
+    movePauseReason.recording = false; // 恢复自由移动
+    // 录音期间引擎可能已退出循环：重力模式重新落回地面，游荡模式重新调度
+    if (freeMove && !stepping && !throwing) {
+        if (moveMode === 'gravity') throwWithParabola(0, 0);
+        else scheduleWander(1500);
+    }
 
     console.log('[Companion] Continuous recording stopped');
 }
@@ -1276,6 +1730,7 @@ function startCompanion() {
     captureAndAnalyze();
     screenCaptureTimer = setInterval(captureAndAnalyze, CAPTURE_INTERVAL);
     startTicks(); // 数值 tick 引擎（驱动说话/思考/冲动）
+    if (config.companionFreeMove) startFreeMove(); // 窗口自由移动（复用桌宠重力/游荡）
     // Initialize STT service
     if (window.electronAPI && window.electronAPI.sttStreamInit) {
         window.electronAPI.sttStreamInit().catch(e => {
@@ -1299,6 +1754,7 @@ function stopCompanion() {
     clearTimeout(speakTimer);
     clearInterval(screenCaptureTimer);
     stopTicks();
+    stopFreeMove(); // 停止窗口自由移动
     screenHistory = [];
     recentDialogs = [];
     conversationSummary = '';
@@ -1314,12 +1770,17 @@ let windowStartX = 0, windowStartY = 0;
 container.addEventListener('mousedown', (e) => {
     if (e.target.closest('.ctrl-btn')) return;
     isDragging = true;
+    movePauseReason.drag = true; // 拖拽期间暂停自由移动引擎
     dragStartX = e.screenX;
     dragStartY = e.screenY;
+    // 拖拽速度采样复位（与 float.js 相同，mouseup 时按此速度抛出）
+    dragVelX = 0; dragVelY = 0;
+    lastDragX = e.screenX; lastDragY = e.screenY;
+    lastDragTime = performance.now();
     if (window.electronAPI) {
         const pos = window.electronAPI.getWindowPos();
-        windowStartX = pos[0];
-        windowStartY = pos[1];
+        windowStartX = pos ? pos[0] : 0;
+        windowStartY = pos ? pos[1] : 0;
     }
 });
 
@@ -1330,9 +1791,32 @@ document.addEventListener('mousemove', (e) => {
     if (window.electronAPI) {
         window.electronAPI.moveCompanionWindow(windowStartX + dx, windowStartY + dy);
     }
+    // 记录拖拽速度（与 float.js 相同：位移/时间差）
+    const now = performance.now();
+    const dt = now - lastDragTime;
+    if (dt > 0) {
+        dragVelX = (e.screenX - lastDragX) / dt;
+        dragVelY = (e.screenY - lastDragY) / dt;
+    }
+    lastDragX = e.screenX; lastDragY = e.screenY; lastDragTime = now;
 });
 
 document.addEventListener('mouseup', () => {
+    if (isDragging) {
+        movePauseReason.drag = false;
+        if (freeMove) {
+            // 同步引擎位置到松手处（与 float.js 一致：从窗口真实位置出发）
+            if (window.electronAPI && window.electronAPI.getWindowPos) {
+                const p = window.electronAPI.getWindowPos();
+                if (p) { mvX = p[0]; mvY = p[1]; }
+            }
+            if (moveMode === 'gravity') {
+                throwWithParabola(dragVelX, dragVelY); // 复刻 float.js：按拖拽速度抛物线抛出
+            } else {
+                scheduleWander(3000); // 游荡模式：停 3s 后继续游荡（与 float.js 相同）
+            }
+        }
+    }
     isDragging = false;
 });
 
@@ -1484,13 +1968,27 @@ async function handleUserReply(text) {
 
     const reply = await callZhipu(prompt, 2, lastScreenImage || undefined);
     if (reply) {
-        showSpeech(reply);
-        if (config.voiceEnabled) speakText(reply);
-        addDialog({ role: 'assistant', content: reply, time: Date.now() });
-        // 记录到近期说过的话
-        recentSpeeches.push(reply);
-        if (recentSpeeches.length > 10) recentSpeeches.shift();
-        await updateMoodFromResponse(reply);
+        // 剥离贴图/移动指令（桌宠贴图模式下 AI 可附加），剩余部分朗读/显示
+        const petCmds = extractPetCommands(reply);
+        const body = petCmds.clean;
+        if (body) {
+            showSpeech(body);
+            if (config.voiceEnabled) speakText(body);
+            addDialog({ role: 'assistant', content: body, time: Date.now() });
+            // 记录到近期说过的话
+            recentSpeeches.push(body);
+            if (recentSpeeches.length > 10) recentSpeeches.shift();
+            await updateMoodFromResponse(body);
+        }
+        if (petCmds.state || petCmds.move || body) {
+            // 有正文或有标签都走统一入口：主回复标签优先，缺失类别独立请求补齐
+            // （纯正文无标签也会触发独立请求；两条都缺才提示网络问题）
+            const cmds = await resolvePetCommands(petCmds, '主人对你说：' + text + '，你回复了：' + body);
+            if (cmds.state || cmds.move) applyPetCommands(cmds);
+            else if (!body) showSpeech('网络好像有点慢，请稍后再试', 3000);
+        } else {
+            showSpeech('网络好像有点慢，请稍后再试', 3000);
+        }
     } else {
         showSpeech('网络好像有点慢，请稍后再试', 3000);
     }

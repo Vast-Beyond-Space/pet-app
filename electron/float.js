@@ -330,6 +330,8 @@ let config = {
     companionPetSize: 180,
     companionThoughtFreq: 'low',
     companionThoughtVisible: false,
+    companionUsePetSprite: false,
+    companionFreeMove: false,
     companionTalkThreshold: 54,
     companionScreenSensitivity: 'medium',
     // ===== 状态链（迁移自 electron-lite）=====
@@ -426,19 +428,18 @@ function saveConfig() {
 // ============================================================
 // 设置面板信息架构（样张结构：一级页 → 分组 → 设置项）
 // ------------------------------------------------------------
-// 一级页固定 6 个：常用 5 页 + 「高级」1 页（收纳行为链 / 状态机 / DSH）。
+// 一级页 5 个：外观与贴图 / 桌宠与浮窗 / 陪伴模式 / AI 与对话 / 高级。
 // 每个页由若干 data-gk 分组组成；新增分组只要把它的 data-gk 加进对应页，
 // 没登记的会自动落到「高级」页，不会被漏掉。
 // 导航是动态生成的，所以以后增删设置分组不需要维护第二份目录。
 // ============================================================
-const SETTINGS_ADVANCED_GROUPS = ['chain', 'state', 'dsh'];
+const SETTINGS_ADVANCED_GROUPS = ['states', 'dsh', 'launch', 'home', 'exit'];
 
 const SETTINGS_PAGES = [
-    { id: 'appearance', ico: '🎨', name: '外观主题', groups: ['theme', 'material', 'style'] },
-    { id: 'pet', ico: '🐾', name: '桌宠与浮窗', groups: ['window', 'pet', 'sticker'] },
-    { id: 'chat', ico: '💬', name: '交互与语音', groups: ['persona', 'voice'] },
-    { id: 'ai', ico: '🤖', name: 'AI 与工具', groups: ['ai'] },
-    { id: 'data', ico: '💾', name: '记忆与数据', groups: ['member', 'display', 'companion', 'launch', 'home', 'exit'] },
+    { id: 'appearance', ico: '🎨', name: '外观与贴图', groups: ['theme', 'material', 'style', 'sticker'] },
+    { id: 'pet', ico: '🐾', name: '桌宠与浮窗', groups: ['window', 'pet', 'display'] },
+    { id: 'companion', ico: '🌸', name: '陪伴模式', groups: ['companion'] },
+    { id: 'ai', ico: '🤖', name: 'AI 与对话', groups: ['ai', 'persona', 'voice', 'member'] },
     { id: 'advanced', ico: '⚙️', name: '高级', groups: SETTINGS_ADVANCED_GROUPS }
 ];
 
@@ -1215,6 +1216,8 @@ function refreshSettingsValues() {
     setVal('companionPetSizeSlider', config.companionPetSize || 180, 'companionPetSizeValue');
     const cThFreq = $('companionThoughtFreqSelect'); if (cThFreq) cThFreq.value = config.companionThoughtFreq || 'low';
     setCheck('companionThoughtVisibleToggle', config.companionThoughtVisible);
+    setCheck('companionUsePetSpriteToggle', config.companionUsePetSprite);
+    setCheck('companionFreeMoveToggle', config.companionFreeMove);
     setVal('companionTalkThresholdSlider', config.companionTalkThreshold != null ? config.companionTalkThreshold : 54, 'companionTalkThresholdValue');
     const cSens = $('companionScreenSensitivitySelect'); if (cSens) cSens.value = config.companionScreenSensitivity || 'medium';
     // [companion-debug] 回填时打印，确认返回到 UI 的值来源
@@ -1563,6 +1566,14 @@ function initSettingsPanel() {
                 config.companionThoughtVisible = t.checked;
                 change(config.companionThoughtVisible);
                 break;
+            case 'companionUsePetSpriteToggle':
+                config.companionUsePetSprite = t.checked;
+                change(config.companionUsePetSprite);
+                break;
+            case 'companionFreeMoveToggle':
+                config.companionFreeMove = t.checked;
+                change(config.companionFreeMove);
+                break;
             case 'companionTalkThresholdSlider':
                 config.companionTalkThreshold = Number(t.value);
                 { const l = document.getElementById('companionTalkThresholdValue'); if (l) l.textContent = t.value; }
@@ -1766,6 +1777,10 @@ function initSettingsPanel() {
     if (cThFreq) cThFreq.value = config.companionThoughtFreq || 'low';
     const cThVis = $('companionThoughtVisibleToggle');
     if (cThVis) cThVis.checked = !!config.companionThoughtVisible;
+    const cPetSprite = $('companionUsePetSpriteToggle');
+    if (cPetSprite) cPetSprite.checked = !!config.companionUsePetSprite;
+    const cFreeMove = $('companionFreeMoveToggle');
+    if (cFreeMove) cFreeMove.checked = !!config.companionFreeMove;
     const cThreshold = $('companionTalkThresholdSlider'), cThresholdVal = $('companionTalkThresholdValue');
     if (cThreshold) { cThreshold.value = config.companionTalkThreshold != null ? config.companionTalkThreshold : 54; if (cThresholdVal) cThresholdVal.textContent = cThreshold.value; }
     const cSens = $('companionScreenSensitivitySelect');
@@ -2435,6 +2450,16 @@ function initSettingsPanel() {
     });
     on(companionThoughtVisibleToggle, 'change', () => {
         config.companionThoughtVisible = companionThoughtVisibleToggle.checked;
+        saveConfig();
+    });
+    const companionUsePetSpriteToggle = $('companionUsePetSpriteToggle');
+    on(companionUsePetSpriteToggle, 'change', () => {
+        config.companionUsePetSprite = companionUsePetSpriteToggle.checked;
+        saveConfig();
+    });
+    const companionFreeMoveToggle = $('companionFreeMoveToggle');
+    on(companionFreeMoveToggle, 'change', () => {
+        config.companionFreeMove = companionFreeMoveToggle.checked;
         saveConfig();
     });
     on(companionTalkThresholdSlider, 'input', () => {

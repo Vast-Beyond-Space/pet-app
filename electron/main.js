@@ -2411,10 +2411,37 @@ function sanitizeChatMessages(list, keepReasoning) {
 //   zhipu  —— 沿用 https.request（忽略证书校验，解决 net-light -101 问题）
 //   其它   —— OpenAI 兼容 fetch（deepseek / 自定义中转站 / 本地 LLM）
 // 返回 {ok, data, status, message}，失败原因交给 ai-fallback 分类（重试 / 换备选）。
+// 判断模型是否支持视觉输入（image_url 内容块）。只放行明确带视觉标记的模型名；
+// 其余（glm-4-flash / deepseek-chat / 自定义等）一律按纯文本处理，防止 400 content.type。
+function modelSupportsVision(model) {
+    return /4\.5v|4\.6v|glm-4v|vision|vl-|vlm|gpt-4o|gemini|claude-3|qwen.*-vl|llava/i.test(String(model || ''));
+}
+
+// 纯文本模型收到含 image_url 的消息会报 400（messages.content.type 取值范围 ['text']）。
+// 回退链切到非视觉模型时：把 content 数组压平成纯文本（保留文字部分，丢弃截图）。
+function stripImagesForTextModel(messages, model) {
+    const hasImage = Array.isArray(messages) && messages.some(m =>
+        Array.isArray(m.content) && m.content.some(p => p && p.type === 'image_url'));
+    if (!hasImage || modelSupportsVision(model)) return messages;
+    const out = messages.map(m => {
+        if (!Array.isArray(m.content)) return m;
+        const text = m.content
+            .filter(p => p && p.type === 'text')
+            .map(p => String(p.text || ''))
+            .join('\n').trim();
+        return Object.assign({}, m, { content: text });
+    });
+    console.log('[ai-chat-request] 候选模型 ' + (model || '(默认)') + ' 不支持图片，已剥离截图（保留文字）');
+    return out;
+}
+
 async function callModelOnce(candidate, { messages, maxTokens, temperature, tools }) {
     // 发送前规范化：补齐 role；带 tools 且该提供商要求回传 reasoning_content 时保留它
     const hasTools = Array.isArray(tools) && tools.length > 0;
-    const safeMessages = sanitizeChatMessages(messages, AIFallback.shouldEchoReasoning(candidate.provider, hasTools));
+    const safeMessages = stripImagesForTextModel(
+        sanitizeChatMessages(messages, AIFallback.shouldEchoReasoning(candidate.provider, hasTools)),
+        candidate.model
+    );
     const body = {
         ...(candidate.model ? { model: candidate.model } : {}),
         messages: safeMessages,
@@ -2460,6 +2487,14 @@ async function callModelOnce(candidate, { messages, maxTokens, temperature, tool
                 req.end();
             });
             if (!parsed || !parsed.choices || !parsed.choices[0]) return { ok: false, status: 0, message: '智谱无有效响应' };
+            // 空正文视为失败（thinking 模型如 glm-4.6v-flash 在 maxTokens 不足时思考占满预算，
+            // HTTP 200 但 content 为空）：标记不可重试、非致命 → runChain 立即换下一候选（如 glm-4-flash）
+            if (!hasTools) {
+                const msg0 = (parsed.choices[0].message || {});
+                if (!String(msg0.content || '').trim() && !msg0.tool_calls) {
+                    return { ok: false, status: 200, message: '模型返回空正文（思考占满 token 或响应异常），换下一候选', retryable: false, fatal: false };
+                }
+            }
             return { ok: true, data: parsed, status: 200, message: '' };
         } catch (e) {
             return { ok: false, status: (e && e.httpStatus) || 0, message: (e && e.message) || String(e) };
@@ -2485,6 +2520,13 @@ async function callModelOnce(candidate, { messages, maxTokens, temperature, tool
             return { ok: false, status: resp.status, message: `HTTP ${resp.status}: ${msg}` };
         }
         if (!data || !data.choices || !data.choices[0]) return { ok: false, status: resp.status, message: '无有效响应（缺少 choices）' };
+        // 空正文视为失败（与智谱分支同理，OpenAI 兼容侧同样防 thinking 模型空响应），立即换下一候选
+        if (!hasTools) {
+            const msg0 = (data.choices[0].message || {});
+            if (!String(msg0.content || '').trim() && !msg0.tool_calls) {
+                return { ok: false, status: resp.status, message: '模型返回空正文（思考占满 token 或响应异常），换下一候选', retryable: false, fatal: false };
+            }
+        }
         return { ok: true, data, status: resp.status, message: '' };
     } catch (e) {
         const aborted = e && e.name === 'AbortError';

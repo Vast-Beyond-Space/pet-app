@@ -55,17 +55,17 @@
       {
         "from": "python",
         "to": "python",
-        "filter": ["**/*"]
+        "filter": ["**/*", "!**/__pycache__/**", "!**/*.pyc", "!**/*.pyo"]
       },
       {
         "from": "tts_service",
         "to": "tts_service",
-        "filter": ["**/*"]
+        "filter": ["**/*", "!**/__pycache__/**", "!**/*.pyc", "!**/*.pyo"]
       },
       {
         "from": "stt_service",
         "to": "stt_service",
-        "filter": ["**/*"]
+        "filter": ["**/*", "!**/__pycache__/**", "!**/*.pyc", "!**/*.pyo", "!**/*.zip"]
       }
     ],
     "win": {
